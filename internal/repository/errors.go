@@ -6,6 +6,6 @@ import (
 
 var (
 	ErrURLNotFound         = errors.New("URL not found")
-	ErrShortURLAlreadyUsed = errors.New("The short URL is already in use for other long URLs")
-	ErrURLMappingNotSaved  = errors.New("The mapping between short URL and long URL is not saved")
+	ErrShortURLAlreadyUsed = errors.New("the short URL is already in use for other long URLs")
+	ErrURLMappingNotSaved  = errors.New("the mapping between short URL and long URL is not saved")
 )

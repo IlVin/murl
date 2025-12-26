@@ -28,7 +28,7 @@ func (s *InMemoryDrv) UpSert(str string) (byte, int, bool) {
 }
 
 // По строке-идентификатору возвращает ранее записанную строку
-func (s *InMemoryDrv) Select(shard_id byte, id int) (string, bool) {
+func (s *InMemoryDrv) Select(shardID byte, id int) (string, bool) {
 	if id < 0 || id >= len(s.data) {
 		return "", false
 	}

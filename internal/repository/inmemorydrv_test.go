@@ -11,14 +11,14 @@ func TestUpSertSelect(t *testing.T) {
 	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
 	drv := NewInMemoryDrv(cfg)
 	{
-		shard_id, idx, ok := drv.UpSert("1234")
+		shardID, idx, ok := drv.UpSert("1234")
 		if !ok {
 			t.Errorf("UpSert failed")
 		}
 		if idx != 0 {
 			t.Errorf("Bad idx")
 		}
-		val, ok := drv.Select(shard_id, idx)
+		val, ok := drv.Select(shardID, idx)
 		if !ok {
 			t.Errorf("Select failed")
 		}
@@ -27,14 +27,14 @@ func TestUpSertSelect(t *testing.T) {
 		}
 	}
 	{
-		shard_id, idx, ok := drv.UpSert("124")
+		shardID, idx, ok := drv.UpSert("124")
 		if !ok {
 			t.Errorf("UpSert failed")
 		}
 		if idx != 1 {
 			t.Errorf("Bad idx")
 		}
-		val, ok := drv.Select(shard_id, idx)
+		val, ok := drv.Select(shardID, idx)
 		if !ok {
 			t.Errorf("Select failed")
 		}
@@ -43,14 +43,14 @@ func TestUpSertSelect(t *testing.T) {
 		}
 	}
 	{
-		shard_id, idx, ok := drv.UpSert("1234")
+		shardID, idx, ok := drv.UpSert("1234")
 		if !ok {
 			t.Errorf("UpSert failed")
 		}
 		if idx != 0 {
 			t.Errorf("Bad idx")
 		}
-		val, ok := drv.Select(shard_id, idx)
+		val, ok := drv.Select(shardID, idx)
 		if !ok {
 			t.Errorf("Select failed")
 		}

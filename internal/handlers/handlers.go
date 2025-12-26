@@ -50,8 +50,8 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 
 func (h *Handlers) HndlGetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		shortId := r.PathValue("id")
-		u, err := h.service.GetURL(shortId)
+		shortID := r.PathValue("id")
+		u, err := h.service.GetURL(shortID)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return

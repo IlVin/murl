@@ -21,7 +21,7 @@ func TestStoreIdx2Str(t *testing.T) {
 	// Схема хранилища: Записать строку в БД и получить строковый идентификатор этой записи
 	store := NewStore(cfg, drv)
 
-	test_plan := []plan{
+	testPlan := []plan{
 		{name: "0", idx: 0, res: "AA"},
 		{name: "1", idx: 1, res: "Ag"},
 		{name: "2", idx: 2, res: "BA"},
@@ -30,7 +30,7 @@ func TestStoreIdx2Str(t *testing.T) {
 		{name: "MinInt", idx: math.MinInt, res: "____________AQ"},
 	}
 
-	for _, p := range test_plan {
+	for _, p := range testPlan {
 		t.Run(p.name, func(t *testing.T) {
 			if store.idx2str(p.idx) != p.res {
 				t.Errorf("idx2str(%d) != '%s' (%s)", p.idx, p.res, store.idx2str(p.idx))
@@ -49,7 +49,7 @@ func TestStoreSaveLoad(t *testing.T) {
 	drv := NewInMemoryDrv(cfg)
 	store := NewStore(cfg, drv)
 
-	test_plan := []plan{
+	testPlan := []plan{
 		{name: "str1", arg: "qwe werqwe rqwe r", res: "AAA"},
 		{name: "str2", arg: "qwe", res: "AAg"},
 		{name: "str3", arg: "erqwer qwer qw", res: "ABA"},
@@ -57,7 +57,7 @@ func TestStoreSaveLoad(t *testing.T) {
 		{name: "str5", arg: "qwe", res: "AAg"},
 	}
 
-	for _, p := range test_plan {
+	for _, p := range testPlan {
 		t.Run(p.name, func(t *testing.T) {
 			id, err := store.Save(p.arg)
 			if err != nil {
@@ -77,37 +77,3 @@ func TestStoreSaveLoad(t *testing.T) {
 	}
 
 }
-
-/*
-
-
-func TestIdx2Str(t *testing.T) {
-}
-
-func TestInMemoryDrv(t *testing.T) {
-	test_plan := []string{
-		"http://123/43563",
-		"http://123/43563/b",
-		"http://123/43563",
-		"http://123/43563/c",
-	}
-
-	cfg := config.GetConfig()
-	drv := NewInMemoryDrv(cfg)
-
-	for _, p := range test_plan {
-		tUrl := p
-		sUrl, ok := drv.UpSert(tUrl)
-		if !ok {
-			t.Errorf("No UpSert data")
-		}
-		lUrl, ok := drv.Select(sUrl)
-		if !ok {
-			t.Errorf("No Select data")
-		}
-		if lUrl != tUrl {
-			t.Errorf("'%s' != '%s'", lUrl, tUrl)
-		}
-	}
-}
-*/

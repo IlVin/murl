@@ -59,8 +59,8 @@ func (s *Service) AddURL(rawURL string) (string, error) {
 	return shortURL.String(), nil
 }
 
-func (s *Service) GetURL(shortId string) (string, error) {
-	u, err := s.store.Load(shortId)
+func (s *Service) GetURL(shortID string) (string, error) {
+	u, err := s.store.Load(shortID)
 	if err != nil {
 		return "", err
 	}

@@ -12,10 +12,10 @@ type StoreConfig interface {
 }
 
 // Поддерживаем драйвера, которые работают с шардами
-// Т.е. идентификатор 2х мерный: shard_id + record_id
+// Т.е. идентификатор 2х мерный: shardID + record_id
 type DataDriver interface {
 	UpSert(str string) (byte, int, bool)
-	Select(shard_id byte, id int) (string, bool)
+	Select(shardID byte, id int) (string, bool)
 }
 
 type Store struct {
@@ -45,13 +45,13 @@ func (s *Store) Save(longStr string) (string, error) {
 	defer s.mux.Unlock()
 
 	// Запись в БД маппинга
-	shard_id, idx, ok := s.db.UpSert(longStr)
+	shardID, idx, ok := s.db.UpSert(longStr)
 	if !ok {
 		return "", ErrURLMappingNotSaved
 	}
-	sUrl := s.sid2char[shard_id:shard_id+1] + s.idx2str(idx)
+	sURL := s.sid2char[shardID:shardID+1] + s.idx2str(idx)
 
-	return sUrl, nil
+	return sURL, nil
 }
 
 // Чтение из БД потоко БЕЗОПАСНОЕ
@@ -63,18 +63,18 @@ func (s *Store) Load(id string) (string, error) {
 	if pos < 0 {
 		return "", ErrURLNotFound
 	}
-	shard_id := byte(pos)
+	shardID := byte(pos)
 
 	idx, ok := s.str2idx(id[1:])
 	if !ok {
 		return "", ErrURLNotFound
 	}
-	lUrl, ok := s.db.Select(shard_id, idx)
+	lURL, ok := s.db.Select(shardID, idx)
 	if !ok {
-		return lUrl, ErrURLNotFound
+		return lURL, ErrURLNotFound
 	}
 
-	return lUrl, nil
+	return lURL, nil
 }
 
 func (s *Store) idx2str(idx int) string {
