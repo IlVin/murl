@@ -43,19 +43,3 @@ func NewRouter(cfg RouterConfig, s MicroURLHandlers) *http.ServeMux {
 func Serve(cfg ServeConfig, router *http.ServeMux) error {
 	return http.ListenAndServe(cfg.Listen(), router)
 }
-
-//func Serve (cfg config.Config, service service.MircoURL) error {
-//	h := NewHandlers(service)
-//	router := NewRouter(h)
-//	srv := &http.Server{
-//		Addr: cfg.ServerAddr,
-//		Handler: router,
-//	}
-//
-//	return srv.ListenAndServe()
-//}
-
-//func NewRouter(h *handlers) *http.ServeMux {
-//	mux := http.NewServeMux()
-//	mux.HandleFunc("", h.GetFB())
-//}
