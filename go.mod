@@ -1,3 +1,3 @@
-module github.com/IlVin/murl
+module murl
 
 go 1.24.4
