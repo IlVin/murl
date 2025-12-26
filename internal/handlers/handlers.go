@@ -12,8 +12,8 @@ type HandlersConfig interface {
 
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
-	AddUrl(url string) (string, error)
-	GetUrl(url string) (string, error)
+	AddURL(url string) (string, error)
+	GetURL(url string) (string, error)
 }
 
 type Handlers struct {
@@ -28,7 +28,7 @@ func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	}
 }
 
-func (h *Handlers) HndlAddUrl() http.HandlerFunc {
+func (h *Handlers) HndlAddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		//		w.WriteHeader(http.StatusOK)
 		var buf bytes.Buffer
@@ -36,7 +36,7 @@ func (h *Handlers) HndlAddUrl() http.HandlerFunc {
 		if err != nil {
 			fmt.Println(err)
 		}
-		murl, err := h.service.AddUrl(buf.String())
+		murl, err := h.service.AddURL(buf.String())
 
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -48,10 +48,10 @@ func (h *Handlers) HndlAddUrl() http.HandlerFunc {
 	}
 }
 
-func (h *Handlers) HndlGetUrl() http.HandlerFunc {
+func (h *Handlers) HndlGetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		shortId := r.PathValue("id")
-		u, err := h.service.GetUrl(shortId)
+		u, err := h.service.GetURL(shortId)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return

@@ -13,7 +13,7 @@ var (
 
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
-	ShortUrlHostAndPort() string
+	ShortURLHostAndPort() string
 }
 
 type MicroURLStore interface {
@@ -33,8 +33,8 @@ func NewService(cfg ServiceConfig, store MicroURLStore) *Service {
 	}
 }
 
-func (s *Service) AddUrl(rawUrl string) (string, error) {
-	u, err := url.Parse(rawUrl)
+func (s *Service) AddURL(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", ErrURLBadFormat
 	}
@@ -50,16 +50,16 @@ func (s *Service) AddUrl(rawUrl string) (string, error) {
 		return "", err
 	}
 
-	shortUrl := &url.URL{
+	shortURL := &url.URL{
 		Scheme: "http",
-		Host:   s.cfg.ShortUrlHostAndPort(),
+		Host:   s.cfg.ShortURLHostAndPort(),
 		Path:   shortPath,
 	}
 
-	return shortUrl.String(), nil
+	return shortURL.String(), nil
 }
 
-func (s *Service) GetUrl(shortId string) (string, error) {
+func (s *Service) GetURL(shortId string) (string, error) {
 	u, err := s.store.Load(shortId)
 	if err != nil {
 		return "", err

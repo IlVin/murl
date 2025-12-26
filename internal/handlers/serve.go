@@ -20,8 +20,8 @@ type ServeConfig interface {
 // Интерфейс, в котором описаны методы объекта, необходимые
 // для конфигурирования Router'а
 type MicroURLHandlers interface {
-	HndlAddUrl() http.HandlerFunc
-	HndlGetUrl() http.HandlerFunc
+	HndlAddURL() http.HandlerFunc
+	HndlGetURL() http.HandlerFunc
 	HndlDefault() http.HandlerFunc
 }
 
@@ -32,8 +32,8 @@ type MicroURLHandlers interface {
 // А затем, чтобы в тестах можно было подменить этот объект моком.
 func NewRouter(cfg RouterConfig, s MicroURLHandlers) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /{$}", s.HndlAddUrl())
-	mux.HandleFunc("GET /{id}", s.HndlGetUrl())
+	mux.HandleFunc("POST /{$}", s.HndlAddURL())
+	mux.HandleFunc("GET /{id}", s.HndlGetURL())
 	mux.HandleFunc("/", s.HndlDefault())
 
 	return mux
@@ -44,7 +44,7 @@ func Serve(cfg ServeConfig, router *http.ServeMux) error {
 	return http.ListenAndServe(cfg.Listen(), router)
 }
 
-//func Serve (cfg config.Config, service service.MircoUrl) error {
+//func Serve (cfg config.Config, service service.MircoURL) error {
 //	h := NewHandlers(service)
 //	router := NewRouter(h)
 //	srv := &http.Server{
