@@ -1,17 +1,15 @@
 package config
 
-import "flag"
-
 type Config struct {
 	listen              string
 	shortURLHostAndPort string
 }
 
 func GetConfig() *Config {
-	c := Config{}
-	flag.StringVar(&c.listen, "listen", "localhost:8080", "IP address and port that the server listens to [IP-address]:portnumber")
-	flag.StringVar(&c.shortURLHostAndPort, "shortURLHostAndPort", "localhost:8080", "Host name and port that the server returns in short URL [IP-address]:portnumber")
-	flag.Parse()
+	c := Config{
+		listen:              "localhost:8080",
+		shortURLHostAndPort: "localhost:8080",
+	}
 	return &c
 }
 

@@ -2,11 +2,14 @@ package service
 
 import (
 	"errors"
+	"murl/internal/model"
 	"net/url"
 )
 
 var (
 	ErrURLBadFormat = errors.New("URL in bad format")
+	ErrDataNotLoad  = errors.New("data not load")
+	ErrDataNotSave  = errors.New("data not save")
 	ErrURLNoAbs     = errors.New("URL is not absolute")
 	ErrURLBadScheme = errors.New("URL has bad sheme")
 )
@@ -17,8 +20,8 @@ type ServiceConfig interface {
 }
 
 type MicroURLStore interface {
-	Save(string) (string, error)
-	Load(string) (string, error)
+	Save(lURL string) (byte, uint64, error)
+	Load(sID byte, idx uint64) (string, error)
 }
 
 type Service struct {
@@ -36,7 +39,7 @@ func NewService(cfg ServiceConfig, store MicroURLStore) *Service {
 func (s *Service) AddURL(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", ErrURLBadFormat
+		return "", errors.Join(ErrURLBadFormat, err)
 	}
 	if !u.IsAbs() {
 		return "", ErrURLNoAbs
@@ -45,24 +48,34 @@ func (s *Service) AddURL(rawURL string) (string, error) {
 		return "", ErrURLBadScheme
 	}
 
-	shortPath, err := s.store.Save(u.String())
+	sID, idx, err := s.store.Save(u.String())
 	if err != nil {
-		return "", err
+		return "", errors.Join(ErrDataNotSave, err)
 	}
 
-	shortURL := &url.URL{
+	// Шаблон для URL
+	tURL := url.URL{
 		Scheme: "http",
-		Host:   s.cfg.ShortURLHostAndPort(),
-		Path:   shortPath,
+		Host:   "localhost:8080",
 	}
 
-	return shortURL.String(), nil
+	sURL, err := model.MakeShortURL(sID, idx, tURL)
+	if err != nil {
+		return "", errors.Join(ErrDataNotSave, err)
+	}
+
+	return sURL, nil
 }
 
-func (s *Service) GetURL(shortID string) (string, error) {
-	u, err := s.store.Load(shortID)
+func (s *Service) GetURL(sURL string) (string, error) {
+	sID, idx, err := model.ParseShortURL(sURL)
 	if err != nil {
-		return "", err
+		return "", errors.Join(ErrURLBadFormat, err)
+	}
+
+	u, err := s.store.Load(sID, idx)
+	if err != nil {
+		return "", errors.Join(ErrDataNotLoad, err)
 	}
 
 	return u, nil

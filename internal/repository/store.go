@@ -1,10 +1,13 @@
 package repository
 
 import (
-	"encoding/base64"
-	"encoding/binary"
-	"strings"
+	"errors"
 	"sync"
+)
+
+var (
+	ErrURLNotFound        error = errors.New("URL not found")
+	ErrURLMappingNotSaved error = errors.New("the mapping between short URL and long URL is not saved")
 )
 
 // Объявляем список используемых параметров конфига
@@ -14,85 +17,50 @@ type StoreConfig interface {
 // Поддерживаем драйвера, которые работают с шардами
 // Т.е. идентификатор 2х мерный: shardID + record_id
 type DataDriver interface {
-	UpSert(str string) (byte, int, bool)
-	Select(shardID byte, id int) (string, bool)
+	UpSert(str string) (byte, uint64, error)
+	Select(sID byte, idx uint64) (string, error)
 }
 
 type Store struct {
-	mux      *sync.Mutex
-	cfg      StoreConfig
-	b64u     *base64.Encoding
-	sid2char string
-	db       DataDriver
+	mux *sync.Mutex
+	cfg StoreConfig
+	db  DataDriver
 }
 
 // Конструктор хранилища с драйвером
 func NewStore(cfg StoreConfig, drv DataDriver) *Store {
 	return &Store{
-		mux:      &sync.Mutex{},
-		cfg:      cfg,
-		b64u:     base64.URLEncoding.WithPadding(base64.NoPadding),
-		sid2char: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
-		db:       drv,
+		mux: &sync.Mutex{},
+		cfg: cfg,
+		db:  drv,
 	}
 }
 
 // Запись в БД потоко БЕЗОПАСНАЯ
 // Записывает строку в БД
 // Возвращает строковый идентификатор записи
-func (s *Store) Save(longStr string) (string, error) {
+func (s *Store) Save(longStr string) (byte, uint64, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
 	// Запись в БД маппинга
-	shardID, idx, ok := s.db.UpSert(longStr)
-	if !ok {
-		return "", ErrURLMappingNotSaved
+	sID, idx, err := s.db.UpSert(longStr)
+	if err != nil {
+		return 0, 0, errors.Join(ErrURLMappingNotSaved, err)
 	}
-	sURL := s.sid2char[shardID:shardID+1] + s.idx2str(idx)
 
-	return sURL, nil
+	return sID, idx, nil
 }
 
 // Чтение из БД потоко БЕЗОПАСНОЕ
-func (s *Store) Load(id string) (string, error) {
+func (s *Store) Load(sID byte, idx uint64) (string, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	pos := strings.Index(s.sid2char, id[:1])
-	if pos < 0 {
-		return "", ErrURLNotFound
-	}
-	shardID := byte(pos)
-
-	idx, ok := s.str2idx(id[1:])
-	if !ok {
-		return "", ErrURLNotFound
-	}
-	lURL, ok := s.db.Select(shardID, idx)
-	if !ok {
-		return lURL, ErrURLNotFound
+	lURL, err := s.db.Select(sID, idx)
+	if err != nil {
+		return "", errors.Join(ErrURLNotFound, err)
 	}
 
 	return lURL, nil
-}
-
-func (s *Store) idx2str(idx int) string {
-	buf := make([]byte, binary.MaxVarintLen64)
-	n := binary.PutVarint(buf, int64(idx))
-
-	return s.b64u.EncodeToString(buf[:n])
-}
-
-func (s *Store) str2idx(str string) (int, bool) {
-	data, err := s.b64u.DecodeString(str)
-	if err != nil {
-		return 0, false
-	}
-	idx, n := binary.Varint(data)
-	if n != len(data) {
-		return 0, false
-	}
-
-	return int(idx), true
 }
