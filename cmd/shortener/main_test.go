@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var ErrNoRedirect error = errors.New("no redirect")
+
 type plan struct {
 	name  string
 	lURL  string
@@ -60,8 +62,6 @@ func TestAddReq(t *testing.T) {
 		})
 	}
 }
-
-var ErrNoRedirect error = errors.New("No redirect")
 
 func TestGetReq(t *testing.T) {
 	cfg := config.GetConfig()
