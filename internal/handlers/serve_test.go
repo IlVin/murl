@@ -17,12 +17,11 @@ import (
 var ErrNoRedirect error = errors.New("no redirect")
 
 type plan struct {
-	name       string
-	RouterType string
-	lURL       string
-	sCode      int
-	sURL       string
-	err        error
+	name  string
+	lURL  string
+	sCode int
+	sURL  string
+	err   error
 }
 
 func TestAddReq(t *testing.T) {
@@ -38,14 +37,14 @@ func TestAddReq(t *testing.T) {
 		defer srv.Close()
 
 		testPlan := []plan{
-			{name: "1st Add First lURL", RouterType: "chi", lURL: "https://iv77msk.ru/about", sURL: "http://localhost:8080/AAA", sCode: http.StatusCreated, err: nil},
-			{name: "1st Add Second lURL", RouterType: "chi", lURL: "https://iv77msk.ru/", sURL: "http://localhost:8080/AAQ", sCode: http.StatusCreated, err: nil},
-			{name: "1st Add Third lURL", RouterType: "chi", lURL: "http://iv77msk.ru/", sURL: "http://localhost:8080/AAg", sCode: http.StatusCreated, err: nil},
-			{name: "2nd Add First lURL", RouterType: "chi", lURL: "https://iv77msk.ru/about", sURL: "http://localhost:8080/AAA", sCode: http.StatusCreated, err: nil},
-			{name: "2nd Add Second lURL", RouterType: "chi", lURL: "https://iv77msk.ru/", sURL: "http://localhost:8080/AAQ", sCode: http.StatusCreated, err: nil},
-			{name: "2nd Add Third lURL", RouterType: "chi", lURL: "http://iv77msk.ru/", sURL: "http://localhost:8080/AAg", sCode: http.StatusCreated, err: nil},
-			{name: "Add Add Bad lURL", RouterType: "chi", lURL: "://iv77msk.ru/", sCode: http.StatusBadRequest, err: nil},
-			{name: "Add Add Bad lURL", RouterType: "chi", lURL: "ftp://iv77msk.ru/", sCode: http.StatusBadRequest, err: nil},
+			{name: "1st Add First lURL", lURL: "https://iv77msk.ru/about", sURL: "http://localhost:8080/AAA", sCode: http.StatusCreated, err: nil},
+			{name: "1st Add Second lURL", lURL: "https://iv77msk.ru/", sURL: "http://localhost:8080/AAQ", sCode: http.StatusCreated, err: nil},
+			{name: "1st Add Third lURL", lURL: "http://iv77msk.ru/", sURL: "http://localhost:8080/AAg", sCode: http.StatusCreated, err: nil},
+			{name: "2nd Add First lURL", lURL: "https://iv77msk.ru/about", sURL: "http://localhost:8080/AAA", sCode: http.StatusCreated, err: nil},
+			{name: "2nd Add Second lURL", lURL: "https://iv77msk.ru/", sURL: "http://localhost:8080/AAQ", sCode: http.StatusCreated, err: nil},
+			{name: "2nd Add Third lURL", lURL: "http://iv77msk.ru/", sURL: "http://localhost:8080/AAg", sCode: http.StatusCreated, err: nil},
+			{name: "Add Add Bad lURL", lURL: "://iv77msk.ru/", sCode: http.StatusBadRequest, err: nil},
+			{name: "Add Add Bad lURL", lURL: "ftp://iv77msk.ru/", sCode: http.StatusBadRequest, err: nil},
 		}
 
 		for _, p := range testPlan {

@@ -33,7 +33,7 @@ func run() error {
 	hndlrs := handlers.NewHandlers(cfg, service)
 
 	// Ручки HTTP протокола
-	router := handlers.NewChiRouter(cfg, hndlrs)
+	router := handlers.NewRouter(cfg, hndlrs)
 
 	// Запуск HTTP сервера
 	return handlers.Serve(cfg, router)
