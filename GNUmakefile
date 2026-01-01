@@ -10,3 +10,10 @@ iter1:
 
 iter2:
 	cd ${WORKDIR}/cmd/shortener && ${WORKDIR}/cmd/tests/shortenertest -test.v -test.run=^TestIteration2$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal
+
+iter3:
+	cd ${WORKDIR}/cmd/shortener && ${WORKDIR}/cmd/tests/shortenertest -test.v -test.run=^TestIteration3$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal
+
+iter4:
+	cd ${WORKDIR}/cmd/shortener && ${WORKDIR}/cmd/tests/shortenertest -test.v -test.run=^TestIteration4$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal
+
