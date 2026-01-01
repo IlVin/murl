@@ -47,7 +47,7 @@ func ParseShortURL(sURL string) (shardID byte, idx uint64, err error) {
 	return shardID, idx, nil
 }
 
-func MakeShortURL(shardID byte, idx uint64, tURL url.URL) (string, error) {
+func MakeShortURL(shardID byte, idx uint64, tURL *url.URL) (string, error) {
 	if int(shardID) >= len(b64uDict) {
 		return "", ErrShardIDOverflow
 	}

@@ -16,7 +16,7 @@ var (
 
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
-	ShortURLHostAndPort() string
+	ShortBaseURL() string
 }
 
 type MicroURLStore interface {
@@ -54,9 +54,9 @@ func (s *Service) AddURL(rawURL string) (string, error) {
 	}
 
 	// Шаблон для URL
-	tURL := url.URL{
-		Scheme: "http",
-		Host:   "localhost:8080",
+	tURL, err := url.Parse(s.cfg.ShortBaseURL())
+	if err != nil {
+		return "", errors.Join(ErrURLBadFormat, err)
 	}
 
 	sURL, err := model.MakeShortURL(sID, idx, tURL)

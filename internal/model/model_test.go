@@ -29,7 +29,7 @@ func TestMakeShortURL(t *testing.T) {
 	for _, p := range testPlan {
 		t.Run(p.name, func(t *testing.T) {
 			tURL, _ := url.Parse(p.tURL)
-			sURL, err := MakeShortURL(p.sID, p.idx, *tURL)
+			sURL, err := MakeShortURL(p.sID, p.idx, tURL)
 
 			if p.err != nil {
 				assert.ErrorIs(t, err, p.err)

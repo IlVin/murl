@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"murl/internal/config"
@@ -16,6 +17,8 @@ func main() {
 }
 
 func run() error {
+
+	flag.Parse()
 
 	// Конфигурация
 	cfg := config.GetConfig()

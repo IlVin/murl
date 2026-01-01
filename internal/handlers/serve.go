@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 
 	chi "github.com/go-chi/chi/v5"
 )
@@ -13,6 +15,7 @@ type RouterConfig interface {
 
 type ServeConfig interface {
 	Listen() string
+	ShortBaseURL() string
 }
 
 // Интерфейс, в котором описаны методы объекта, необходимые
@@ -62,5 +65,6 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 
 // Запуск сервера. Передаем конфиг и роутер
 func Serve(cfg ServeConfig, router http.Handler) error {
+	fmt.Fprintf(os.Stderr, "Shortener server listen on [%s]\nShort base URL is [%s]\n", cfg.Listen(), cfg.ShortBaseURL())
 	return http.ListenAndServe(cfg.Listen(), router)
 }
