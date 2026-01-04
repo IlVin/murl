@@ -61,22 +61,30 @@ func (s *ShortBaseURL) Set(flagValue string) error {
 	return nil
 }
 
+// Флаги по умолчанию
+func defaultListen() *NetAddress {
+	return &NetAddress{Host: "localhost", Port: 8080}
+}
+func defaultShortBaseURL() *ShortBaseURL {
+	return &ShortBaseURL{u: &url.URL{Scheme: "http", Host: "localhost:8080"}}
+}
+
 // Функции, возвращающие значения флагов
-var GetCmdFlagListen func() string
-var GetCmdFlagShortBaseURL func() string
+var GetCmdFlagListen func() string = func() string { return defaultListen().String() }
+var GetCmdFlagShortBaseURL func() string = func() string { return defaultShortBaseURL().String() }
 
 // Декларируем флаги
-func init() {
+func InitFlags() {
 	GetCmdFlagListen = func() func() string {
-		listen := NetAddress{Host: "localhost", Port: 8080}
-		flag.Var(&listen, "a", "Listen [host:port]")
+		listen := defaultListen()
+		flag.Var(listen, "a", "Listen ["+listen.String()+"]")
 		return func() string {
 			return listen.String()
 		}
 	}()
 	GetCmdFlagShortBaseURL = func() func() string {
-		shortBaseURL := ShortBaseURL{u: &url.URL{Scheme: "http", Host: "localhost:8080"}}
-		flag.Var(&shortBaseURL, "b", "Short base URL [http://localhost:8080/]")
+		shortBaseURL := defaultShortBaseURL()
+		flag.Var(shortBaseURL, "b", "Short base URL ["+shortBaseURL.String()+"]")
 		return func() string {
 			return shortBaseURL.String()
 		}

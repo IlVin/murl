@@ -20,6 +20,10 @@ func main() {
 
 func run() error {
 
+	// Инициализация флагов
+	config.InitFlags()
+
+	// Парсинг флагов
 	flag.Parse()
 
 	// Конфигурация
