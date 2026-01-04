@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 
 	"murl/internal/config"
 	"murl/internal/handlers"
@@ -39,5 +41,6 @@ func run() error {
 	router := handlers.NewRouter(cfg, hndlrs)
 
 	// Запуск HTTP сервера
+	fmt.Fprintf(os.Stderr, "Shortener server listen on [%s]\nShort base URL is [%s]\n", cfg.Listen(), cfg.ShortBaseURL())
 	return handlers.Serve(cfg, router)
 }
