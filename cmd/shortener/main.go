@@ -45,6 +45,6 @@ func run() error {
 	router := handlers.NewRouter(cfg, hndlrs)
 
 	// Запуск HTTP сервера
-	fmt.Fprintf(os.Stderr, "Shortener server listen on [%s]\nShort base URL is [%s]\n", cfg.Listen(), cfg.ShortBaseURL())
+	fmt.Fprintf(os.Stderr, "Shortener server v%s\nListen on [%s]\nShort base URL is [%s]\n", cfg.Version(), cfg.Listen(), cfg.ShortBaseURL())
 	return handlers.Serve(cfg, router)
 }

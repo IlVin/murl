@@ -9,8 +9,6 @@ import (
 	"strings"
 )
 
-var version string = "0.0.1"
-
 var ErrBadAddressFormat = errors.New("bad address format [localhost]")
 var ErrBadPortFormat = errors.New("bad port format [8080]")
 var ErrBadShortBaseURLFormat = errors.New("bad address format [http://host:port/]")

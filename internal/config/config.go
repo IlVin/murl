@@ -20,6 +20,7 @@ type Config struct {
 func GetConfig() Config {
 	return Config{
 		prms: map[string]string{
+			"Version":      "0.0.1",
 			"Listen":       GetCmdFlagListen(),
 			"ShortBaseURL": GetCmdFlagShortBaseURL(),
 			"RouterType":   "chi",
@@ -42,6 +43,10 @@ func (c Config) Modify(mVals map[string]string) Config {
 }
 
 // Значения конфига
+func (c Config) Version() string {
+	return c.prms["Version"]
+}
+
 func (c Config) Listen() string {
 	return c.prms["Listen"]
 }
