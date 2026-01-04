@@ -53,7 +53,7 @@ func MakeShortURL(shardID byte, idx uint64, tURL *url.URL) (string, error) {
 	}
 	buf := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(buf, idx)
-	tURL.Path = "/" + b64uDict[shardID:shardID+1] + b64u().EncodeToString(buf[:n])
+	tURL = tURL.JoinPath(b64uDict[shardID:shardID+1] + b64u().EncodeToString(buf[:n]))
 
 	return tURL.String(), nil
 }

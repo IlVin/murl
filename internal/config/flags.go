@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -16,6 +15,7 @@ var ErrBadAddressFormat = errors.New("bad address format [localhost]")
 var ErrBadPortFormat = errors.New("bad port format [8080]")
 var ErrBadShortBaseURLFormat = errors.New("bad address format [http://host:port/]")
 
+// NetAddress
 type NetAddress struct {
 	Host string
 	Port int
@@ -39,6 +39,7 @@ func (n *NetAddress) Set(flagValue string) error {
 	return nil
 }
 
+// ShortBaseURL
 type ShortBaseURL struct {
 	u *url.URL
 }
@@ -48,14 +49,11 @@ func (s *ShortBaseURL) String() string {
 }
 
 func (s *ShortBaseURL) Set(flagValue string) error {
-	re := regexp.MustCompile(`\A(http|https)://([^:]+)(|:([0-9]+))/?\z`)
-	res := re.Find([]byte(flagValue))
-	if res == nil {
-		return ErrBadShortBaseURLFormat
-	}
-
-	u, err := url.Parse(string(res))
+	u, err := url.Parse(string(flagValue))
 	if err != nil {
+		return errors.Join(ErrBadShortBaseURLFormat, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
 		return errors.Join(ErrBadShortBaseURLFormat, err)
 	}
 
@@ -63,23 +61,24 @@ func (s *ShortBaseURL) Set(flagValue string) error {
 	return nil
 }
 
-var cmdFlags = struct {
-	Listen       NetAddress
-	ShortBaseURL ShortBaseURL
-}{
-	Listen:       NetAddress{Host: "localhost", Port: 8080},
-	ShortBaseURL: ShortBaseURL{u: &url.URL{Scheme: "http", Host: "localhost:8080"}},
-}
+// Функции, возвращающие значения флагов
+var GetCmdFlagListen func() string
+var GetCmdFlagShortBaseURL func() string
 
-func getCmdFlagListen() string {
-	return cmdFlags.Listen.String()
-}
-
-func getCmdFlagShortBaseURL() string {
-	return cmdFlags.ShortBaseURL.String()
-}
-
+// Декларируем флаги
 func init() {
-	flag.Var(&(cmdFlags.Listen), "a", "Listen [host:port]")
-	flag.Var(&(cmdFlags.ShortBaseURL), "b", "Short base URL [http://localhost:8080/]")
+	GetCmdFlagListen = func() func() string {
+		listen := NetAddress{Host: "localhost", Port: 8080}
+		flag.Var(&listen, "a", "Listen [host:port]")
+		return func() string {
+			return listen.String()
+		}
+	}()
+	GetCmdFlagShortBaseURL = func() func() string {
+		shortBaseURL := ShortBaseURL{u: &url.URL{Scheme: "http", Host: "localhost:8080"}}
+		flag.Var(&shortBaseURL, "b", "Short base URL [http://localhost:8080/]")
+		return func() string {
+			return shortBaseURL.String()
+		}
+	}()
 }

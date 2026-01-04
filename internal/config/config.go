@@ -20,8 +20,8 @@ type Config struct {
 func GetConfig() Config {
 	return Config{
 		prms: map[string]string{
-			"Listen":       getCmdFlagListen(),
-			"ShortBaseURL": getCmdFlagShortBaseURL(),
+			"Listen":       GetCmdFlagListen(),
+			"ShortBaseURL": GetCmdFlagShortBaseURL(),
 			"RouterType":   "chi",
 		},
 	}
