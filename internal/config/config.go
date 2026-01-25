@@ -1,6 +1,8 @@
 package config
 
-import "maps"
+import (
+	"maps"
+)
 
 // Config должен быть неизменяемым в коде, чтобы не получилась ситуация, когда тест для своих нужд изменяет
 // конфиг, а потом "забывает" вернуть значение конфига в предыдущее состояние, а код в других местах
@@ -18,9 +20,10 @@ type Config struct {
 func GetConfig() Config {
 	return Config{
 		prms: map[string]string{
-			"Listen":              "localhost:8080",
-			"ShortURLHostAndPort": "localhost:8080",
-			"RouterType":          "chi",
+			"Version":      "0.0.1",
+			"Listen":       GetCmdFlagListen(),
+			"ShortBaseURL": GetCmdFlagShortBaseURL(),
+			"RouterType":   "chi",
 		},
 	}
 }
@@ -40,12 +43,16 @@ func (c Config) Modify(mVals map[string]string) Config {
 }
 
 // Значения конфига
+func (c Config) Version() string {
+	return c.prms["Version"]
+}
+
 func (c Config) Listen() string {
 	return c.prms["Listen"]
 }
 
-func (c Config) ShortURLHostAndPort() string {
-	return c.prms["ShortURLHostAndPort"]
+func (c Config) ShortBaseURL() string {
+	return c.prms["ShortBaseURL"]
 }
 
 func (c Config) RouterType() string {

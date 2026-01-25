@@ -13,6 +13,7 @@ type RouterConfig interface {
 
 type ServeConfig interface {
 	Listen() string
+	ShortBaseURL() string
 }
 
 // Интерфейс, в котором описаны методы объекта, необходимые
