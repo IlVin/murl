@@ -1,5 +1,11 @@
 package repository
 
+import "errors"
+
+var (
+	ErrDBRecordNotFound = errors.New("record not found")
+)
+
 // Объявляем список используемых параметров конфига
 type InMemoryDrvConfig interface {
 }
@@ -16,22 +22,22 @@ func NewInMemoryDrv(cfg InMemoryDrvConfig) *InMemoryDrv {
 }
 
 // Записывает какую-то строку в БД и возвращает строку-идентификатор записи
-func (s *InMemoryDrv) UpSert(str string) (byte, int, bool) {
+func (s *InMemoryDrv) UpSert(str string) (byte, uint64, error) {
 	for idx, val := range s.data {
 		if val == str {
-			return 0, idx, true
+			return 0, uint64(idx), nil
 		}
 	}
 	idx := len(s.data)
 	s.data = append(s.data, str)
-	return 0, idx, true
+	return 0, uint64(idx), nil
 }
 
 // По строке-идентификатору возвращает ранее записанную строку
-func (s *InMemoryDrv) Select(shardID byte, id int) (string, bool) {
-	if id < 0 || id >= len(s.data) {
-		return "", false
+func (s *InMemoryDrv) Select(shardID byte, idx uint64) (string, error) {
+	if idx >= uint64(len(s.data)) {
+		return "", ErrDBRecordNotFound
 	}
 
-	return s.data[id], true
+	return s.data[idx], nil
 }

@@ -3,59 +3,59 @@ package repository
 import (
 	"murl/internal/config"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestUpSertSelect(t *testing.T) {
+func TestUpSert(t *testing.T) {
 	// Конфигурация
 	cfg := config.GetConfig()
-	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
 	drv := NewInMemoryDrv(cfg)
-	{
-		shardID, idx, ok := drv.UpSert("1234")
-		if !ok {
-			t.Errorf("UpSert failed")
-		}
-		if idx != 0 {
-			t.Errorf("Bad idx")
-		}
-		val, ok := drv.Select(shardID, idx)
-		if !ok {
-			t.Errorf("Select failed")
-		}
-		if val != "1234" {
-			t.Errorf("Bad URL")
-		}
+
+	testPlan := []struct {
+		name      string
+		upsertStr string
+		shardID   byte
+		idx       uint64
+	}{
+		{name: "First upsert", upsertStr: "123", shardID: 0, idx: 0},
+		{name: "Second upsert", upsertStr: "1234", shardID: 0, idx: 1},
+		{name: "2nd First upsert", upsertStr: "123", shardID: 0, idx: 0},
+		{name: "3rd upsert", upsertStr: "", shardID: 0, idx: 2},
 	}
-	{
-		shardID, idx, ok := drv.UpSert("124")
-		if !ok {
-			t.Errorf("UpSert failed")
-		}
-		if idx != 1 {
-			t.Errorf("Bad idx")
-		}
-		val, ok := drv.Select(shardID, idx)
-		if !ok {
-			t.Errorf("Select failed")
-		}
-		if val != "124" {
-			t.Errorf("Bad URL")
-		}
+
+	for _, test := range testPlan {
+		t.Run(test.name, func(t *testing.T) {
+			shardID, idx, err := drv.UpSert(test.upsertStr)
+			assert.NoError(t, err)
+			assert.Equal(t, test.shardID, shardID)
+			assert.Equal(t, test.idx, idx)
+
+			val, err := drv.Select(shardID, idx)
+			assert.NoError(t, err)
+			assert.Equal(t, test.upsertStr, val)
+		})
 	}
-	{
-		shardID, idx, ok := drv.UpSert("1234")
-		if !ok {
-			t.Errorf("UpSert failed")
-		}
-		if idx != 0 {
-			t.Errorf("Bad idx")
-		}
-		val, ok := drv.Select(shardID, idx)
-		if !ok {
-			t.Errorf("Select failed")
-		}
-		if val != "1234" {
-			t.Errorf("Bad URL")
-		}
+}
+
+func TestSelect(t *testing.T) {
+	// Конфигурация
+	cfg := config.GetConfig()
+	drv := NewInMemoryDrv(cfg)
+
+	testPlan := []struct {
+		name string
+		sID  byte
+		idx  uint64
+		err  error
+	}{
+		{name: "Not found", sID: 1, idx: 0, err: ErrDBRecordNotFound},
+	}
+
+	for _, test := range testPlan {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := drv.Select(test.sID, test.idx)
+			assert.ErrorIs(t, err, test.err)
+		})
 	}
 }

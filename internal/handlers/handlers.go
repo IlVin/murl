@@ -30,7 +30,6 @@ func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 
 func (h *Handlers) HndlAddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		//		w.WriteHeader(http.StatusOK)
 		var buf bytes.Buffer
 		_, err := buf.ReadFrom(r.Body)
 		if err != nil {
@@ -43,6 +42,7 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 			return
 		}
 
+		w.Header().Add("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(murl))
 	}
@@ -50,8 +50,7 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 
 func (h *Handlers) HndlGetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		shortID := r.PathValue("id")
-		u, err := h.service.GetURL(shortID)
+		u, err := h.service.GetURL(r.URL.String())
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
