@@ -1,0 +1,14 @@
+
+Пробросить localhost порты из одного контейнера к другому можно с помошью socat утилиты
+
+until nc -z PostgreSQLHost 5432; do
+  echo "Ждем БД..."
+  sleep 1
+done
+socat TCP-LISTEN:5432,fork TCP:PostgreSQLHost:5432 &
+./start-my-app
+
+
+Поселить контейнер в сеть другого контейнера:
+
+docker run --network container:<ID_контейнера_БД> my-app-image

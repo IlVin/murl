@@ -70,6 +70,7 @@ func defaultShortBaseURL() *ShortBaseURL {
 // Функции, возвращающие значения флагов
 var GetCmdFlagListen func() string = func() string { return defaultListen().String() }
 var GetCmdFlagShortBaseURL func() string = func() string { return defaultShortBaseURL().String() }
+var GetCmdFlagDBConfigPath func() string = func() string { return "" }
 
 // Декларируем флаги
 func InitFlags() {
@@ -85,6 +86,13 @@ func InitFlags() {
 		flag.Var(shortBaseURL, "b", "Short base URL ["+shortBaseURL.String()+"]")
 		return func() string {
 			return shortBaseURL.String()
+		}
+	}()
+	GetCmdFlagDBConfigPath = func() func() string {
+		databaseConfigPath := ""
+		flag.StringVar(&databaseConfigPath, "db", "", "DB config path []")
+		return func() string {
+			return databaseConfigPath
 		}
 	}()
 }

@@ -1,8 +1,12 @@
 package config
 
 import (
+	"errors"
 	"maps"
 )
+
+var ErrCannotReadConfigFile = errors.New("cannot read config file")
+var ErrBadJSONFormat = errors.New("bad json format")
 
 // Config должен быть неизменяемым в коде, чтобы не получилась ситуация, когда тест для своих нужд изменяет
 // конфиг, а потом "забывает" вернуть значение конфига в предыдущее состояние, а код в других местах
@@ -24,6 +28,7 @@ func GetConfig() Config {
 			"Listen":       GetCmdFlagListen(),
 			"ShortBaseURL": GetCmdFlagShortBaseURL(),
 			"RouterType":   "chi",
+			"DBConfigPath": GetCmdFlagDBConfigPath(),
 		},
 	}
 }
@@ -57,4 +62,8 @@ func (c Config) ShortBaseURL() string {
 
 func (c Config) RouterType() string {
 	return c.prms["RouterType"]
+}
+
+func (c Config) DBConfigPath() string {
+	return c.prms["DBConfigPath"]
 }
