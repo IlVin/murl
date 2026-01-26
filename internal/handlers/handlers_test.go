@@ -30,7 +30,8 @@ type req struct {
 
 func TestHndlAddURL(t *testing.T) {
 
-	cfg, _ := config.GetConfig(nil, nil)
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := service.NewService(cfg, store)
