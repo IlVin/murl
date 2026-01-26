@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +9,8 @@ import (
 	"murl/internal/handlers"
 	"murl/internal/repository"
 	"murl/internal/service"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -19,15 +20,17 @@ func main() {
 }
 
 func run() error {
-
-	// Инициализация флагов
-	config.InitFlags()
-
-	// Парсинг флагов
-	flag.Parse()
+	// Загрузка .env
+	_ = godotenv.Load()
 
 	// Конфигурация
-	cfg := config.GetConfig()
+	cmdArgs := os.Args[1:]
+	cfg, err := config.GetConfig(&cmdArgs, nil)
+	fmt.Fprintf(os.Stderr, "Shortener server v%s\n", cfg.Version())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: cannot load config:\n%w\n", err)
+		os.Exit(500)
+	}
 
 	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
 	drv := repository.NewInMemoryDrv(cfg)
@@ -45,6 +48,6 @@ func run() error {
 	router := handlers.NewRouter(cfg, hndlrs)
 
 	// Запуск HTTP сервера
-	fmt.Fprintf(os.Stderr, "Shortener server v%s\nListen on [%s]\nShort base URL is [%s]\n", cfg.Version(), cfg.Listen(), cfg.ShortBaseURL())
+	fmt.Fprintf(os.Stderr, "Listen on [%s]\nShort base URL is [%s]\n", cfg.ListenAddr(), cfg.ShortBaseURL())
 	return handlers.Serve(cfg, router)
 }

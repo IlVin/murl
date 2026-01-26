@@ -16,7 +16,8 @@ type plan struct {
 
 // Записываем длинные строки в хранилище и получаем строки-идентификаторы с закодированным на 1й позиции номером шарда
 func TestStoreSaveLoad(t *testing.T) {
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := NewInMemoryDrv(cfg)
 	store := NewStore(cfg, drv)
 

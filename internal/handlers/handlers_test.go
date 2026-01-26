@@ -30,7 +30,7 @@ type req struct {
 
 func TestHndlAddURL(t *testing.T) {
 
-	cfg := config.GetConfig()
+	cfg, _ := config.GetConfig(nil, nil)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := service.NewService(cfg, store)
@@ -97,7 +97,8 @@ func TestHndlAddURL(t *testing.T) {
 
 func TestHndlGetURLError(t *testing.T) {
 
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := service.NewService(cfg, store)
@@ -149,7 +150,8 @@ func TestHndlGetURLError(t *testing.T) {
 
 func TestHndlGetURL(t *testing.T) {
 
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := service.NewService(cfg, store)

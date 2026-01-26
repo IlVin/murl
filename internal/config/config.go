@@ -1,60 +1,162 @@
 package config
 
 import (
-	"maps"
+	"flag"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
 )
 
-// Config должен быть неизменяемым в коде, чтобы не получилась ситуация, когда тест для своих нужд изменяет
-// конфиг, а потом "забывает" вернуть значение конфига в предыдущее состояние, а код в других местах
-// теста при этом ломается.
-// Поэтому изменяем конфиг путем копирования значений старого конфига в новый конфиг и модификации в новом конфиге нужных значений.
-// Производительность:
-//   Считаем, что структуры длиной до 128 байт передаются по значению без существенной просадки по производительности.
-//   Модификация конфига - дорогая операция и нужна в основном в тестах
-
+// +--------------------------+
+// |  Config - иммутабельный  |
+// +--------------------------+
 type Config struct {
-	prms map[string]string
+	routerType   string
+	version      string
+	listenAddr   SocketAddr
+	shortBaseURL ShortBaseURL
 }
 
-// Фабрика конфига
-func GetConfig() Config {
-	return Config{
-		prms: map[string]string{
-			"Version":      "0.0.1",
-			"Listen":       GetCmdFlagListen(),
-			"ShortBaseURL": GetCmdFlagShortBaseURL(),
-			"RouterType":   "chi",
-		},
+type LookupEnvFunc func(key string) (string, bool)
+
+// GetConfig фабрика конфига, которая должна вызываться один раз
+func GetConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
+	// Подмена функции чтения переменных окружения
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
 	}
-}
 
-// Модификатор конфига
-func (c Config) Modify(mVals map[string]string) Config {
-	newConfig := Config{prms: make(map[string]string)}
-	maps.Copy(newConfig.prms, c.prms)
+	// Default config
+	cfg := Config{
+		version:      "0.0.1",
+		routerType:   "chi",
+		listenAddr:   SocketAddr{hostname: "localhost", port: "8080"},
+		shortBaseURL: ShortBaseURL{url.URL{Scheme: "http", Host: "localhost:8080", Path: "/"}},
+	}
 
-	for pName := range newConfig.prms {
-		newVal, ok := mVals[pName]
-		if ok {
-			newConfig.prms[pName] = newVal
+	// Command line arguments
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
+		sAddr, err := NewSocketAddr(s)
+		if err != nil {
+			return fmt.Errorf("invalid ListenAddr format: %w", err)
+		}
+		cfg = cfg.SetListenAddr(sAddr)
+		return nil
+	})
+	fs.Func("b", fmt.Sprintf("Base address for short URL (%s)", cfg.ShortBaseURL()), func(s string) error {
+		sbURL, err := NewShortBaseURL(s)
+		if err != nil {
+			return fmt.Errorf("invalid ShortBaseURL format: %w", err)
+		}
+		cfg = cfg.SetShortBaseURL(sbURL)
+		return nil
+	})
+	if cmdArgs != nil {
+		if err := fs.Parse(*cmdArgs); err != nil {
+			return cfg, fmt.Errorf("failed to parse flags: %w", err)
 		}
 	}
-	return newConfig
+
+	// Парсинг переменных окружения
+	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
+		addr, err := NewSocketAddr(val)
+		if err != nil {
+			return cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
+		}
+		cfg = cfg.SetListenAddr(addr)
+	}
+	if val, ok := lookupEnv("BASE_URL"); ok {
+		sb, err := NewShortBaseURL(val)
+		if err != nil {
+			return cfg, fmt.Errorf("env BASE_URL error: %w", err)
+		}
+		cfg = cfg.SetShortBaseURL(sb)
+	}
+
+	return cfg, nil
 }
 
-// Значения конфига
 func (c Config) Version() string {
-	return c.prms["Version"]
+	return c.version
 }
-
-func (c Config) Listen() string {
-	return c.prms["Listen"]
-}
-
-func (c Config) ShortBaseURL() string {
-	return c.prms["ShortBaseURL"]
+func (c Config) SetVersion(version string) Config {
+	c.version = version
+	return c
 }
 
 func (c Config) RouterType() string {
-	return c.prms["RouterType"]
+	return c.routerType
+}
+func (c Config) SetRouterType(routerType string) Config {
+	c.routerType = routerType
+	return c
+}
+
+func (c Config) ListenAddr() string {
+	return c.listenAddr.String()
+}
+func (c Config) SetListenAddr(listenAddr SocketAddr) Config {
+	c.listenAddr = listenAddr
+	return c
+}
+
+func (c Config) ShortBaseURL() string {
+	return c.shortBaseURL.String()
+}
+func (c Config) SetShortBaseURL(sb ShortBaseURL) Config {
+	c.shortBaseURL.URL = sb.URL
+	c.shortBaseURL.URL.User = nil
+	return c
+}
+
+// +----------------------------+
+// | SocketAddr - иммутабельный |
+// +----------------------------+
+type SocketAddr struct {
+	hostname string
+	port     string
+}
+
+func NewSocketAddr(host string) (SocketAddr, error) {
+	hostname, port, err := net.SplitHostPort(host)
+	if err != nil {
+		return SocketAddr{}, fmt.Errorf("bad net address: %w", err)
+	}
+	return SocketAddr{hostname: hostname, port: port}, nil
+}
+
+func (s SocketAddr) String() string {
+	return net.JoinHostPort(s.hostname, s.port)
+}
+
+// +------------------------------+
+// | ShortBaseURL - иммутабельный |
+// +------------------------------+
+type ShortBaseURL struct {
+	url.URL
+}
+
+func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
+	sbURL, err := url.Parse(baseURL)
+	if err != nil {
+		return ShortBaseURL{}, fmt.Errorf("invalid ShortBaseURL: %w", err)
+	}
+	return ShortBaseURL{*sbURL}, nil
+}
+
+func (s ShortBaseURL) String() string {
+	return s.URL.String()
+}
+
+// =================  UTILS  =================
+
+// Must враппер, поддерживающий цепочки изменения конфига
+// Например: newCfg := oldCfg.SetListenAddr(Must(NewSocketAddr("127.0.0.1:45"))).SetVersion("123")
+func Must[T any](val T, err error) T {
+	if err != nil {
+		panic(fmt.Sprintf("config panic: %v", err))
+	}
+	return val
 }

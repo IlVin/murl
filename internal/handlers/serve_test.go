@@ -27,12 +27,13 @@ type plan struct {
 func TestAddReq(t *testing.T) {
 
 	for _, rType := range []string{"mux", "chi"} {
-		cfg := config.GetConfig()
+		cfg, err := config.GetConfig(nil, nil)
+		assert.Nil(t, err)
 		drv := repository.NewInMemoryDrv(cfg)
 		store := repository.NewStore(cfg, drv)
 		service := service.NewService(cfg, store)
 		hndlrs := NewHandlers(cfg, service)
-		router := NewRouter(cfg.Modify(map[string]string{"RouterType": rType}), hndlrs)
+		router := NewRouter(cfg.SetRouterType(rType), hndlrs)
 		srv := httptest.NewServer(router)
 		defer srv.Close()
 
@@ -68,12 +69,13 @@ func TestAddReq(t *testing.T) {
 func TestGetReq(t *testing.T) {
 	for _, rType := range []string{"mux", "chi"} {
 
-		cfg := config.GetConfig()
+		cfg, err := config.GetConfig(nil, nil)
+		assert.Nil(t, err)
 		drv := repository.NewInMemoryDrv(cfg)
 		store := repository.NewStore(cfg, drv)
 		service := service.NewService(cfg, store)
 		hndlrs := NewHandlers(cfg, service)
-		router := NewRouter(cfg.Modify(map[string]string{"RouterType": rType}), hndlrs)
+		router := NewRouter(cfg.SetRouterType(rType), hndlrs)
 		srv := httptest.NewServer(router)
 		defer srv.Close()
 

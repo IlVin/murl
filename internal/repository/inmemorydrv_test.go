@@ -9,7 +9,8 @@ import (
 
 func TestUpSert(t *testing.T) {
 	// Конфигурация
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := NewInMemoryDrv(cfg)
 
 	testPlan := []struct {
@@ -40,7 +41,8 @@ func TestUpSert(t *testing.T) {
 
 func TestSelect(t *testing.T) {
 	// Конфигурация
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := NewInMemoryDrv(cfg)
 
 	testPlan := []struct {

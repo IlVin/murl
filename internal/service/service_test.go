@@ -9,7 +9,8 @@ import (
 )
 
 func TestAddURL(t *testing.T) {
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := NewService(cfg, store)
@@ -40,7 +41,8 @@ func TestAddURL(t *testing.T) {
 }
 
 func TestAddURLErrors(t *testing.T) {
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := NewService(cfg, store)
@@ -64,7 +66,8 @@ func TestAddURLErrors(t *testing.T) {
 }
 
 func TestGetURL(t *testing.T) {
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := NewService(cfg, store)
@@ -92,7 +95,8 @@ func TestGetURL(t *testing.T) {
 }
 
 func TestGetURLErrors(t *testing.T) {
-	cfg := config.GetConfig()
+	cfg, err := config.GetConfig(nil, nil)
+	assert.Nil(t, err)
 	drv := repository.NewInMemoryDrv(cfg)
 	store := repository.NewStore(cfg, drv)
 	service := NewService(cfg, store)

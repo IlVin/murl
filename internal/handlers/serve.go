@@ -12,7 +12,7 @@ type RouterConfig interface {
 }
 
 type ServeConfig interface {
-	Listen() string
+	ListenAddr() string
 	ShortBaseURL() string
 }
 
@@ -63,5 +63,5 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 
 // Запуск сервера. Передаем конфиг и роутер
 func Serve(cfg ServeConfig, router http.Handler) error {
-	return http.ListenAndServe(cfg.Listen(), router)
+	return http.ListenAndServe(cfg.ListenAddr(), router)
 }
