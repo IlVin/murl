@@ -28,7 +28,7 @@ func run() error {
 	cfg, err := config.GetConfig(&cmdArgs, nil)
 	fmt.Fprintf(os.Stderr, "Shortener server v%s\n", cfg.Version())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: cannot load config:\n%w\n", err)
+		fmt.Errorf("ERROR: cannot load config:\n%w\n", err)
 		os.Exit(500)
 	}
 
