@@ -10,13 +10,21 @@ import (
 // Делаем враппер для ResponseWriter
 type wrapResponseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode   int
+	respBodySize int
 }
 
 // Перехват StatusCode
 func (r *wrapResponseWriter) WriteHeader(statusCode int) {
 	r.statusCode = statusCode
 	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+// Попсчет размера ответа
+func (r *wrapResponseWriter) Write(data []byte) (int, error) {
+	sz, err := r.ResponseWriter.Write(data)
+	r.respBodySize += sz
+	return sz, err
 }
 
 // WithLogging добавляет дополнительный код для регистрации сведений о запросе
@@ -39,6 +47,7 @@ func WithLogging(cfg IServeConfig, h http.Handler) http.Handler {
 			zap.String("uri", r.RequestURI),
 			zap.String("method", r.Method),
 			zap.Int("status", wrapper.statusCode),
+			zap.Int("size", wrapper.respBodySize),
 			zap.Duration("duration", time.Since(start)),
 		)
 	}

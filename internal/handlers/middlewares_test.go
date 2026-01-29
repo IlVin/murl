@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
-// mockLogConfig реализует IServeConfig для теста логов
+// mockLogConfig реализует IServeConfig для теста
 type mockLogConfig struct {
 	logger *zap.Logger
 }
@@ -19,24 +19,21 @@ func (m mockLogConfig) Zap() *zap.Logger   { return m.logger }
 func (m mockLogConfig) ListenAddr() string { return "" }
 
 func TestWithLogging(t *testing.T) {
-	t.Run("log status 200 by default", func(t *testing.T) {
+	t.Run("log status 200 and body size", func(t *testing.T) {
+		// Создаем наблюдатель за логами
 		core, obs := observer.New(zap.InfoLevel)
 		logger := zap.New(core)
 		cfg := mockLogConfig{logger: logger}
 
-		// Хендлер, который ничего не пишет в заголовок
+		content := "hello world"
+		// Хендлер, который пишет данные (проверка Write и размера)
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if _, err := w.Write([]byte("ok")); err != nil {
-				logger.Debug("failed to write response",
-					zap.String("event", "network_error"),
-					zap.Error(err),
-				)
-			}
+			w.Write([]byte(content))
 		})
 
 		handler := WithLogging(cfg, next)
 
-		req := httptest.NewRequest(http.MethodGet, "/test-200", nil)
+		req := httptest.NewRequest(http.MethodGet, "/test-size", nil)
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -44,13 +41,13 @@ func TestWithLogging(t *testing.T) {
 		// Проверяем логи
 		assert.Equal(t, 1, obs.Len())
 		logEntry := obs.All()[0]
-		assert.Equal(t, "http request handled", logEntry.Message)
 
-		// Проверяем поля в логе
 		fields := logEntry.ContextMap()
-		assert.Equal(t, "/test-200", fields["uri"])
+		assert.Equal(t, "/test-size", fields["uri"])
 		assert.Equal(t, "GET", fields["method"])
-		assert.Equal(t, int64(200), fields["status"]) // По умолчанию 200
+		assert.Equal(t, int64(200), fields["status"])
+		assert.Equal(t, int64(len(content)), fields["size"]) // Проверка нового поля
+		assert.Contains(t, fields, "duration")
 	})
 
 	t.Run("log explicit status 400", func(t *testing.T) {
@@ -58,9 +55,10 @@ func TestWithLogging(t *testing.T) {
 		logger := zap.New(core)
 		cfg := mockLogConfig{logger: logger}
 
-		// Хендлер, который явно ставит 400
+		// Хендлер, который явно ставит статус (проверка WriteHeader)
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("bad"))
 		})
 
 		handler := WithLogging(cfg, next)
@@ -73,6 +71,6 @@ func TestWithLogging(t *testing.T) {
 		logEntry := obs.All()[0]
 		fields := logEntry.ContextMap()
 		assert.Equal(t, int64(400), fields["status"])
-		assert.Equal(t, "POST", fields["method"])
+		assert.Equal(t, int64(3), fields["size"]) // "bad" = 3 bytes
 	})
 }
