@@ -9,14 +9,14 @@ import (
 	"strings"
 )
 
-const b64uDict string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+const b64uDict = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 var (
-	ErrShardIDOverflow error = errors.New("ShardID overflow (must be less than " + strconv.Itoa(len(b64uDict)) + ")")
-	ErrParseURL        error = errors.New("failed to parse URL")
-	ErrBadB64U         error = errors.New("BASE64u string is corrupted")
-	ErrBadBinIdx       error = errors.New("binary idx is corrupted")
-	ErrBadShardID      error = errors.New("binary ShardID is corrupted")
+	ErrShardIDLimit  = errors.New("shard id exceeds maximum limit of " + strconv.Itoa(len(b64uDict)-1))
+	ErrInvalidFormat = errors.New("invalid short url format")
+	ErrDecodeBase64  = errors.New("failed to decode base64 data")
+	ErrDecodeIndex   = errors.New("failed to decode record index")
+	ErrInvalidShard  = errors.New("invalid shard identifier")
 )
 
 func b64u() *base64.Encoding {
@@ -25,35 +25,48 @@ func b64u() *base64.Encoding {
 
 func ParseShortURL(sURL string) (shardID byte, idx uint64, err error) {
 	u, err := url.Parse(sURL)
-	if err != nil {
-		return 0, 0, errors.Join(ErrParseURL, err)
+	// Путь должен быть минимум 3 символа: "/" + "шард" + "минимум 1 байт данных"
+	if err != nil || len(u.Path) < 3 {
+		return 0, 0, ErrInvalidFormat
 	}
 
-	pos := strings.Index(b64uDict, u.Path[1:2])
+	// Извлекаем шард из первого символа после слэша
+	pos := strings.Index(b64uDict, string(u.Path[1]))
 	if pos < 0 {
-		return 0, 0, ErrBadShardID
+		return 0, 0, ErrInvalidShard
 	}
 	shardID = byte(pos)
 
+	// Декодируем индекс из остатка пути
 	data, err := b64u().DecodeString(u.Path[2:])
 	if err != nil {
-		return 0, 0, errors.Join(ErrBadB64U, err)
+		return 0, 0, errors.Join(ErrDecodeBase64, err)
 	}
+
 	idx, n := binary.Uvarint(data)
-	if n != len(data) {
-		return 0, 0, ErrBadBinIdx
+	if n <= 0 || n != len(data) {
+		return 0, 0, ErrDecodeIndex
 	}
 
 	return shardID, idx, nil
 }
 
-func MakeShortURL(shardID byte, idx uint64, tURL *url.URL) (string, error) {
+func MakeShortURL(shardID byte, idx uint64, baseURL *url.URL) (string, error) {
 	if int(shardID) >= len(b64uDict) {
-		return "", ErrShardIDOverflow
+		return "", ErrShardIDLimit
 	}
+
+	// Кодируем индекс в компактный Varint
 	buf := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(buf, idx)
-	tURL = tURL.JoinPath(b64uDict[shardID:shardID+1] + b64u().EncodeToString(buf[:n]))
 
-	return tURL.String(), nil
+	// Формируем путь: 1 символ словаря для шарда + base64 от индекса
+	encodedIdx := b64u().EncodeToString(buf[:n])
+	shortPath := b64uDict[shardID:shardID+1] + encodedIdx
+
+	// Создаем копию URL, чтобы не мутировать оригинал
+	resURL := *baseURL
+	resURL = *resURL.JoinPath(shortPath)
+
+	return resURL.String(), nil
 }

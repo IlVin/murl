@@ -2,67 +2,94 @@ package service
 
 import (
 	"errors"
+	"murl/internal/config"
 	"murl/internal/model"
 	"net/url"
+
+	"go.uber.org/zap"
 )
 
 var (
-	ErrURLBadFormat = errors.New("URL in bad format")
-	ErrDataNotLoad  = errors.New("data not load")
-	ErrDataNotSave  = errors.New("data not save")
-	ErrURLNoAbs     = errors.New("URL is not absolute")
-	ErrURLBadScheme = errors.New("URL has bad sheme")
+	ErrInvalidURL        = errors.New("invalid URL format")
+	ErrStoreGetFailed    = errors.New("failed to retrieve data")
+	ErrStoreSaveFailed   = errors.New("failed to persist data")
+	ErrURLNoAbs          = errors.New("URL is not absolute")
+	ErrUnsupportedScheme = errors.New("unsupported protocol scheme")
 )
 
 // Объявляем список используемых параметров конфига
-type ServiceConfig interface {
-	ShortBaseURL() string
+type IServiceConfig interface {
+	config.IZapLogger
+	ShortBaseURL() config.ShortBaseURL
 }
 
-type MicroURLStore interface {
+type MicroURLRepo interface {
 	Save(lURL string) (byte, uint64, error)
 	Load(sID byte, idx uint64) (string, error)
 }
 
 type Service struct {
-	cfg   ServiceConfig
-	store MicroURLStore
+	zap          *zap.Logger
+	shortBaseURL config.ShortBaseURL
+	repo         MicroURLRepo
 }
 
-func NewService(cfg ServiceConfig, store MicroURLStore) *Service {
+func NewService(cfg IServiceConfig, repo MicroURLRepo) *Service {
 	return &Service{
-		cfg:   cfg,
-		store: store,
+		zap:          cfg.Zap(),
+		shortBaseURL: cfg.ShortBaseURL(),
+		repo:         repo,
 	}
 }
 
-func (s *Service) AddURL(rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
+func (s *Service) AddURL(longURL string) (string, error) {
+	u, err := url.Parse(longURL)
 	if err != nil {
-		return "", errors.Join(ErrURLBadFormat, err)
+		s.zap.Warn("invalid URL provided",
+			zap.String("long_url", longURL),
+			zap.Error(err),
+		)
+		return "", errors.Join(ErrInvalidURL, err)
 	}
 	if !u.IsAbs() {
+		s.zap.Warn("longURL is not absolute",
+			zap.String("long_url", longURL),
+		)
 		return "", ErrURLNoAbs
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", ErrURLBadScheme
+		s.zap.Warn("invalid scheme",
+			zap.String("long_url", longURL),
+			zap.String("scheme", u.Scheme),
+		)
+		return "", ErrUnsupportedScheme
 	}
 
-	sID, idx, err := s.store.Save(u.String())
+	sID, idx, err := s.repo.Save(u.String())
 	if err != nil {
-		return "", errors.Join(ErrDataNotSave, err)
+		s.zap.Warn("longURL not saved",
+			zap.String("long_url", u.String()),
+			zap.Error(err),
+		)
+		return "", errors.Join(ErrStoreSaveFailed, err)
 	}
 
-	// Шаблон для URL
-	tURL, err := url.Parse(s.cfg.ShortBaseURL())
+	sURL, err := model.MakeShortURL(sID, idx, &s.shortBaseURL.URL)
 	if err != nil {
-		return "", errors.Join(ErrURLBadFormat, err)
+		s.zap.Warn("cannot make shortURL",
+			zap.Uint8("sID", sID),
+			zap.Uint64("idx", idx),
+			zap.String("long_url", longURL),
+			zap.Error(err),
+		)
+		return "", errors.Join(ErrStoreSaveFailed, err)
 	}
 
-	sURL, err := model.MakeShortURL(sID, idx, tURL)
-	if err != nil {
-		return "", errors.Join(ErrDataNotSave, err)
-	}
+	s.zap.Info("URL shortened",
+		zap.Uint8("sID", sID),
+		zap.Uint64("idx", idx),
+		zap.String("short_url", sURL),
+	)
 
 	return sURL, nil
 }
@@ -70,12 +97,21 @@ func (s *Service) AddURL(rawURL string) (string, error) {
 func (s *Service) GetURL(sURL string) (string, error) {
 	sID, idx, err := model.ParseShortURL(sURL)
 	if err != nil {
-		return "", errors.Join(ErrURLBadFormat, err)
+		s.zap.Debug("bad format incoming shortURL",
+			zap.String("sURL", sURL),
+			zap.Error(err),
+		)
+		return "", errors.Join(ErrInvalidURL, err)
 	}
 
-	u, err := s.store.Load(sID, idx)
+	u, err := s.repo.Load(sID, idx)
 	if err != nil {
-		return "", errors.Join(ErrDataNotLoad, err)
+		s.zap.Error("failed to load URL from repo",
+			zap.Uint8("sID", sID),
+			zap.Uint64("idx", idx),
+			zap.Error(err),
+		)
+		return "", errors.Join(ErrStoreGetFailed, err)
 	}
 
 	return u, nil

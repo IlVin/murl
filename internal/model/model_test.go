@@ -5,69 +5,80 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type plan struct {
-	name string
-	sID  byte
-	sURL string
-	tURL string
-	idx  uint64
-	host string
-	res  string
-	err  error
-}
-
 func TestMakeShortURL(t *testing.T) {
-	testPlan := []plan{
-		{name: "sID=0, Idx=0", sID: 0, idx: 0, tURL: "http://localhost", res: "http://localhost/AAA"},
-		{name: "sID=0, Idx=0", sID: 0, idx: 0, tURL: "http://localhost:8080", res: "http://localhost:8080/AAA"},
-		{name: "sID=10, Idx=90", sID: 10, idx: 90, tURL: "http://localhost", res: "http://localhost/KWg"},
-		{name: "sID=100, Idx=90", sID: 100, idx: 90, tURL: "http://localhost", err: ErrShardIDOverflow},
-	}
+	baseURL, _ := url.Parse("http://localhost:8080")
 
-	for _, p := range testPlan {
-		t.Run(p.name, func(t *testing.T) {
-			tURL, _ := url.Parse(p.tURL)
-			sURL, err := MakeShortURL(p.sID, p.idx, tURL)
+	t.Run("success min values", func(t *testing.T) {
+		// Shard 0 ('A') + Idx 0 (varint 0x00 -> base64 "A")
+		res, err := MakeShortURL(0, 0, baseURL)
+		assert.NoError(t, err)
+		assert.Equal(t, "http://localhost:8080/AAA", res)
+	})
 
-			if p.err != nil {
-				assert.ErrorIs(t, err, p.err)
-			} else {
-				assert.NoErrorf(t, err, "Error MakeShortURL(%d, %d, %s): %v", p.sID, p.idx, p.host, err)
-				assert.Equal(t, p.res, sURL, "Wrong res=%s != sURL=%s%", p.res, sURL)
+	t.Run("success max values", func(t *testing.T) {
+		// Shard 63 ('_') + Idx Max
+		res, err := MakeShortURL(63, 18446744073709551615, baseURL)
+		assert.NoError(t, err)
+		assert.Contains(t, res, "http://localhost:8080/_")
+	})
 
-				sID, idx, err := ParseShortURL(sURL)
-
-				assert.NoErrorf(t, err, "Error ParseShortURL(%s): %v", sURL, err)
-				assert.Equal(t, p.sID, sID, "Wrong sID=%d", sID)
-				assert.Equal(t, p.idx, idx, "Wrong idx=%d", idx)
-			}
-		})
-	}
+	t.Run("shard overflow error", func(t *testing.T) {
+		_, err := MakeShortURL(64, 1, baseURL)
+		assert.ErrorIs(t, err, ErrShardIDLimit)
+	})
 }
 
 func TestParseShortURL(t *testing.T) {
-	testPlan := []plan{
-		{name: "sID=0, Idx=0", sURL: "http://localhost/AAA", sID: 0, idx: 0},
-		{name: "sID=0, Idx=0", sURL: "http://localhost:8080/AAA", sID: 0, idx: 0},
-		{name: "sID=10, Idx=90", sURL: "http://localhost/KWg", sID: 10, idx: 90},
-		{name: "ErrParseURL", sURL: "http://localhost/K%tAE", err: ErrParseURL},
-		{name: "ErrBadShardID", sURL: "http://localhost/~KtAE", err: ErrBadShardID},
-		{name: "ErrBadB64U", sURL: "http://localhost/Kt~AE", err: ErrBadB64U},
-		{name: "ErrBadBinIdx", sURL: "http://localhost/KtAEtAEtAEtAEtAEtAEtAEE", err: ErrBadBinIdx},
-	}
+	t.Run("success round-trip", func(t *testing.T) {
+		baseURL, _ := url.Parse("http://localhost:8080")
+		originalShard := byte(10)
+		originalIdx := uint64(123456789)
 
-	for _, p := range testPlan {
-		t.Run(p.name, func(t *testing.T) {
-			sID, idx, err := ParseShortURL(p.sURL)
-			if p.err != nil {
-				assert.ErrorIs(t, err, p.err)
-			} else {
-				assert.NoErrorf(t, err, "Error ParseShortURL(%s): %v", p.sURL, err)
-				assert.Equal(t, p.sID, sID, "Wrong sID=%d", sID)
-				assert.Equal(t, p.idx, idx, "Wrong idx=%d", idx)
-			}
-		})
-	}
+		sURL, _ := MakeShortURL(originalShard, originalIdx, baseURL)
+
+		shard, idx, err := ParseShortURL(sURL)
+		require.NoError(t, err)
+		assert.Equal(t, originalShard, shard)
+		assert.Equal(t, originalIdx, idx)
+	})
+
+	t.Run("invalid url parse", func(t *testing.T) {
+		_, _, err := ParseShortURL(":")
+		assert.ErrorIs(t, err, ErrInvalidFormat)
+	})
+
+	t.Run("path too short", func(t *testing.T) {
+		_, _, err := ParseShortURL("http://localhost/A")
+		assert.ErrorIs(t, err, ErrInvalidFormat)
+	})
+
+	t.Run("invalid shard character", func(t *testing.T) {
+		// Символ '!' не входит в b64uDict
+		_, _, err := ParseShortURL("http://localhost/!AA")
+		assert.ErrorIs(t, err, ErrInvalidShard)
+	})
+
+	t.Run("invalid base64 data (bad symbols)", func(t *testing.T) {
+		// '/' — невалидный символ для URLEncoding, вызовет ошибку декодирования
+		_, _, err := ParseShortURL("http://localhost/Af///")
+		assert.ErrorIs(t, err, ErrDecodeBase64)
+	})
+
+	t.Run("invalid varint data (corrupted bytes)", func(t *testing.T) {
+		// "gA" — это 0x80 в base64.
+		// 0x80 — это начало varint (MSB установлен), но данных дальше нет.
+		// n вернет 0 или отрицательное число, что вызовет ErrDecodeIndex.
+		_, _, err := ParseShortURL("http://localhost/AgA")
+		assert.ErrorIs(t, err, ErrDecodeIndex)
+	})
+}
+
+func TestB64u(t *testing.T) {
+	enc := b64u()
+	assert.NotNil(t, enc)
+	// Проверка URL-safe символа: 63-й индекс (0x3F) -> '_'
+	assert.Equal(t, "_", enc.EncodeToString([]byte{63 << 2})[:1])
 }

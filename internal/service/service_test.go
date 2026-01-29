@@ -1,118 +1,136 @@
 package service
 
 import (
+	"errors"
 	"murl/internal/config"
-	"murl/internal/repository"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
-func TestAddURL(t *testing.T) {
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := NewService(cfg, store)
-
-	testPlan := []struct {
-		name string
-		lURL string
-		sURL string
-	}{
-		{name: "1st good URL", lURL: "http://iv77msk.ru/about/", sURL: "http://localhost:8080/AAA"},
-		{name: "2nd good URL", lURL: "http://iv77msk.ru/jobs/", sURL: "http://localhost:8080/AAQ"},
-		{name: "3rd good URL", lURL: "http://yandex.ru/school/", sURL: "http://localhost:8080/AAg"},
-		{name: "Second 1st good URL", lURL: "http://iv77msk.ru/about/", sURL: "http://localhost:8080/AAA"},
-		{name: "Second 2nd good URL", lURL: "http://iv77msk.ru/jobs/", sURL: "http://localhost:8080/AAQ"},
-		{name: "Second 3rd good URL", lURL: "http://yandex.ru/school/", sURL: "http://localhost:8080/AAg"},
-	}
-	for _, test := range testPlan {
-		t.Run(test.name, func(t *testing.T) {
-			sURL, err := service.AddURL(test.lURL)
-			assert.NoError(t, err)
-			assert.Equal(t, test.sURL, sURL)
-
-			lURL, err := service.GetURL(sURL)
-			assert.NoError(t, err)
-			assert.Equal(t, test.lURL, lURL)
-		})
-	}
+// mockRepo реализует интерфейс MicroURLRepo
+type mockRepo struct {
+	mock.Mock
 }
 
-func TestAddURLErrors(t *testing.T) {
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := NewService(cfg, store)
-
-	testPlan := []struct {
-		name string
-		lURL string
-		err  error
-	}{
-		{name: "1st bad URL", lURL: "://bad", err: ErrURLBadFormat},
-		{name: "2nd bad URL", lURL: "/bad", err: ErrURLNoAbs},
-		{name: "3rd bad URL", lURL: "ftp://localhost:8080/bad", err: ErrURLBadScheme},
-		{name: "3rd bad URL", lURL: "ftp://localhost:8080/bad", err: ErrURLBadScheme},
-	}
-	for _, test := range testPlan {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := service.AddURL(test.lURL)
-			assert.ErrorIs(t, err, test.err)
-		})
-	}
+func (m *mockRepo) Save(lURL string) (byte, uint64, error) {
+	args := m.Called(lURL)
+	return args.Get(0).(byte), args.Get(1).(uint64), args.Error(2)
 }
 
-func TestGetURL(t *testing.T) {
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := NewService(cfg, store)
-
-	testPlan := []struct {
-		name string
-		lURL string
-		sURL string
-	}{
-		{name: "1st good URL", lURL: "http://iv77msk.ru/about/", sURL: "http://localhost:8080/AAA"},
-		{name: "2nd good URL", lURL: "http://iv77msk.ru/jobs/", sURL: "http://localhost:8080/AAQ"},
-		{name: "3rd good URL", lURL: "http://yandex.ru/school/", sURL: "http://localhost:8080/AAg"},
-	}
-	for _, test := range testPlan {
-		t.Run(test.name, func(t *testing.T) {
-			sURL, err := service.AddURL(test.lURL)
-			assert.NoError(t, err)
-			assert.Equal(t, test.sURL, sURL)
-
-			lURL, err := service.GetURL(sURL)
-			assert.NoError(t, err)
-			assert.Equal(t, test.lURL, lURL)
-		})
-	}
+func (m *mockRepo) Load(sID byte, idx uint64) (string, error) {
+	args := m.Called(sID, idx)
+	return args.String(0), args.Error(1)
 }
 
-func TestGetURLErrors(t *testing.T) {
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := NewService(cfg, store)
+// mockCfg реализует IServiceConfig
+type mockCfg struct {
+	baseURL string
+	logger  *zap.Logger
+}
 
-	testPlan := []struct {
-		name string
-		sURL string
-		err  error
-	}{
-		{name: "1st bad URL", sURL: "://bad", err: ErrURLBadFormat},
-		{name: "2nd bad URL", sURL: "/bad", err: ErrDataNotLoad},
+func (m mockCfg) ShortBaseURL() config.ShortBaseURL {
+	u, _ := url.Parse(m.baseURL)
+	return config.ShortBaseURL{URL: *u}
+}
+
+func (m mockCfg) Zap() *zap.Logger {
+	if m.logger == nil {
+		return zap.NewNop()
 	}
-	for _, test := range testPlan {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := service.GetURL(test.sURL)
-			assert.ErrorIs(t, err, test.err)
-		})
-	}
+	return m.logger
+}
+
+func TestService_AddURL(t *testing.T) {
+	logger := zap.NewNop()
+	baseCfg := mockCfg{baseURL: "http://localhost:8080", logger: logger}
+
+	t.Run("success", func(t *testing.T) {
+		repo := new(mockRepo)
+		svc := NewService(baseCfg, repo)
+		longURL := "https://google.com"
+
+		repo.On("Save", longURL).Return(byte(1), uint64(10), nil)
+
+		res, err := svc.AddURL(longURL)
+		require.NoError(t, err)
+		assert.Contains(t, res, "http://localhost:8080")
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("parse error", func(t *testing.T) {
+		svc := NewService(baseCfg, nil)
+		// Управляющий символ в URL вызовет ошибку url.Parse
+		_, err := svc.AddURL("http://[::1]:index")
+		assert.ErrorIs(t, err, ErrInvalidURL)
+	})
+
+	t.Run("not absolute", func(t *testing.T) {
+		svc := NewService(baseCfg, nil)
+		_, err := svc.AddURL("just/path")
+		assert.ErrorIs(t, err, ErrURLNoAbs)
+	})
+
+	t.Run("unsupported scheme", func(t *testing.T) {
+		svc := NewService(baseCfg, nil)
+		_, err := svc.AddURL("ftp://server.com")
+		assert.ErrorIs(t, err, ErrUnsupportedScheme)
+	})
+
+	t.Run("repo save error", func(t *testing.T) {
+		repo := new(mockRepo)
+		svc := NewService(baseCfg, repo)
+		repo.On("Save", mock.Anything).Return(byte(0), uint64(0), errors.New("db fail"))
+
+		_, err := svc.AddURL("https://valid.com")
+		assert.ErrorIs(t, err, ErrStoreSaveFailed)
+	})
+
+	t.Run("model error (shard overflow)", func(t *testing.T) {
+		repo := new(mockRepo)
+		svc := NewService(baseCfg, repo)
+		// shardID 100 вызывает ErrShardIDLimit в пакете model
+		repo.On("Save", mock.Anything).Return(byte(100), uint64(1), nil)
+
+		_, err := svc.AddURL("https://valid.com")
+		assert.ErrorIs(t, err, ErrStoreSaveFailed)
+	})
+}
+
+func TestService_GetURL(t *testing.T) {
+	logger := zap.NewNop()
+	baseCfg := mockCfg{baseURL: "http://localhost:8080", logger: logger}
+
+	t.Run("success", func(t *testing.T) {
+		repo := new(mockRepo)
+		svc := NewService(baseCfg, repo)
+		expectedURL := "https://yandex.ru"
+
+		// Моделируем валидную ссылку (Shard A=0, Index 0=A) -> "/AA"
+		repo.On("Load", byte(0), uint64(0)).Return(expectedURL, nil)
+
+		res, err := svc.GetURL("http://localhost:8080/AAA")
+		require.NoError(t, err)
+		assert.Equal(t, expectedURL, res)
+	})
+
+	t.Run("model parse error", func(t *testing.T) {
+		svc := NewService(baseCfg, nil)
+		// Слишком короткий путь вызовет ошибку в model
+		_, err := svc.GetURL("http://localhost:8080/A")
+		assert.ErrorIs(t, err, ErrInvalidURL)
+	})
+
+	t.Run("repo load error", func(t *testing.T) {
+		repo := new(mockRepo)
+		svc := NewService(baseCfg, repo)
+		repo.On("Load", mock.Anything, mock.Anything).Return("", errors.New("not found"))
+
+		_, err := svc.GetURL("http://localhost:8080/AAA")
+		assert.ErrorIs(t, err, ErrStoreGetFailed)
+	})
 }

@@ -1,194 +1,131 @@
 package handlers
 
 import (
-	"io"
-	"murl/internal/config"
-	"murl/internal/repository"
-	"murl/internal/service"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 )
 
-type resp struct {
-	code        int
-	contentType string
-	location    string
-	body        string
+// mockService реализует интерфейс IMicroURLService
+type mockService struct {
+	mock.Mock
 }
 
-type req struct {
-	method      string
-	path        string
-	contentType string
-	body        io.Reader
+func (m *mockService) AddURL(url string) (string, error) {
+	args := m.Called(url)
+	return args.String(0), args.Error(1)
 }
 
-func TestHndlAddURL(t *testing.T) {
-
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := service.NewService(cfg, store)
-
-	testPlan := []struct {
-		name     string
-		request  req
-		response resp
-	}{
-		{
-			name:     "Add URL #1",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("http://iv77msk.ru/about")},
-			response: resp{code: http.StatusCreated, contentType: "text/plain", body: "http://localhost:8080/AAA"},
-		},
-		{
-			name:     "Add URL #2",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("https://practicum.yandex.ru/learn/go-advanced/courses/")},
-			response: resp{code: http.StatusCreated, contentType: "text/plain", body: "http://localhost:8080/AAQ"},
-		},
-		{
-			name:     "2nd Add URL #1",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("http://iv77msk.ru/about")},
-			response: resp{code: http.StatusCreated, contentType: "text/plain", body: "http://localhost:8080/AAA"},
-		},
-		{
-			name:     "2nd Add URL #2",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("https://practicum.yandex.ru/learn/go-advanced/courses/")},
-			response: resp{code: http.StatusCreated, contentType: "text/plain", body: "http://localhost:8080/AAQ"},
-		},
-		{
-			name:     "Add No URL",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("")},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-		{
-			name:     "Add Bad URL",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("://123")},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-		{
-			name:     "Add Wrong URL Schema",
-			request:  req{method: "POST", path: "/", contentType: "text/plain", body: strings.NewReader("ftp://123")},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-	}
-
-	for _, p := range testPlan {
-		t.Run(p.name, func(t *testing.T) {
-			r := httptest.NewRequest(p.request.method, p.request.path, p.request.body)
-			w := httptest.NewRecorder()
-			NewHandlers(cfg, service).HndlAddURL()(w, r)
-			res := w.Result()
-			defer res.Body.Close()
-
-			assert.Equal(t, p.response.code, res.StatusCode)
-			assert.Equal(t, p.response.contentType, res.Header.Get("Content-Type"))
-
-			resBody, err := io.ReadAll(res.Body)
-			require.NoError(t, err)
-			assert.Equal(t, p.response.body, string(resBody))
-		})
-	}
+func (m *mockService) GetURL(url string) (string, error) {
+	args := m.Called(url)
+	return args.String(0), args.Error(1)
 }
 
-func TestHndlGetURLError(t *testing.T) {
-
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := service.NewService(cfg, store)
-
-	testPlan := []struct {
-		name     string
-		request  req
-		response resp
-	}{
-		{
-			name:     "Get Bad URL Path",
-			request:  req{method: "GET", path: "/", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-		{
-			name:     "Get Bad URL ID in Path #1",
-			request:  req{method: "GET", path: "/BBBB", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-		{
-			name:     "Get Bad URL ID in Path #2",
-			request:  req{method: "GET", path: "/~BBBB", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-		{
-			name:     "Get Bad URL ID in Path #3",
-			request:  req{method: "GET", path: "/BB~BB", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusBadRequest, contentType: "", body: ""},
-		},
-	}
-
-	for _, p := range testPlan {
-		t.Run(p.name, func(t *testing.T) {
-			r := httptest.NewRequest(p.request.method, p.request.path, p.request.body)
-			w := httptest.NewRecorder()
-			NewHandlers(cfg, service).HndlAddURL()(w, r)
-			res := w.Result()
-			defer res.Body.Close()
-
-			assert.Equal(t, p.response.code, res.StatusCode)
-			assert.Equal(t, p.response.contentType, res.Header.Get("Content-Type"))
-
-			resBody, err := io.ReadAll(res.Body)
-			require.NoError(t, err)
-			assert.Equal(t, p.response.body, string(resBody))
-		})
-	}
+// mockCfg реализует интерфейс IHandlersConfig
+type mockCfg struct {
+	logger *zap.Logger
 }
 
-func TestHndlGetURL(t *testing.T) {
+func (m mockCfg) Zap() *zap.Logger {
+	return m.logger
+}
 
-	cfg, err := config.GetConfig(nil, nil)
-	assert.Nil(t, err)
-	drv := repository.NewInMemoryDrv(cfg)
-	store := repository.NewStore(cfg, drv)
-	service := service.NewService(cfg, store)
+// errReader имитирует ошибку чтения при вызове io.ReadAll
+type errReader struct{}
 
-	testPlan := []struct {
-		name     string
-		request  req
-		response resp
-	}{
-		{
-			name:     "Get URL #1",
-			request:  req{method: "GET", path: "/AAA", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusTemporaryRedirect, location: "http://iv77msk.ru/about"},
-		},
-		{
-			name:     "Get URL #2",
-			request:  req{method: "GET", path: "/AAQ", contentType: "text/plain", body: nil},
-			response: resp{code: http.StatusTemporaryRedirect, location: "https://practicum.yandex.ru/learn/go-advanced/courses/"},
-		},
-	}
-	// Add new records to DB
-	for _, p := range testPlan {
-		NewHandlers(cfg, service).HndlAddURL()(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(p.response.location)))
-	}
+func (e *errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read error")
+}
+func (e *errReader) Close() error { return nil }
 
-	// Testing
-	for _, p := range testPlan {
-		t.Run(p.name, func(t *testing.T) {
-			r := httptest.NewRequest(p.request.method, p.request.path, p.request.body)
-			w := httptest.NewRecorder()
-			NewHandlers(cfg, service).HndlGetURL()(w, r)
-			res := w.Result()
-			defer res.Body.Close()
+func TestHandlers_HndlAddURL(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := mockCfg{logger: logger}
 
-			assert.Equal(t, p.response.code, res.StatusCode)
-			assert.Equal(t, p.response.location, res.Header.Get("Location"))
-		})
-	}
+	t.Run("success 201", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		longURL := "https://google.com"
+		shortURL := "http://localhost:8080/AAA"
+
+		svc.On("AddURL", longURL).Return(shortURL, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(longURL))
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		assert.Equal(t, "text/plain", w.Header().Get("Content-Type"))
+		assert.Equal(t, shortURL, w.Body.String())
+	})
+
+	t.Run("read body error 500", func(t *testing.T) {
+		h := NewHandlers(cfg, nil)
+		req := httptest.NewRequest(http.MethodPost, "/", &errReader{})
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("service error 400", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		svc.On("AddURL", mock.Anything).Return("", errors.New("invalid url"))
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("bad-url"))
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestHandlers_HndlGetURL(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := mockCfg{logger: logger}
+
+	t.Run("success redirect 307", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		longURL := "https://google.com"
+
+		svc.On("GetURL", "/AAA").Return(longURL, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/AAA", nil)
+		w := httptest.NewRecorder()
+
+		h.HndlGetURL()(w, req)
+
+		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+		assert.Equal(t, longURL, w.Header().Get("Location"))
+	})
+
+	t.Run("not found 400", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		svc.On("GetURL", mock.Anything).Return("", errors.New("not found"))
+
+		req := httptest.NewRequest(http.MethodGet, "/invalid", nil)
+		w := httptest.NewRecorder()
+
+		h.HndlGetURL()(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestHandlers_HndlDefault(t *testing.T) {
+	h := NewHandlers(mockCfg{logger: zap.NewNop()}, nil)
+	req := httptest.NewRequest(http.MethodPatch, "/", nil)
+	w := httptest.NewRecorder()
+
+	h.HndlDefault()(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

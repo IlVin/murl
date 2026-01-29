@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"os"
 
 	"murl/internal/config"
@@ -11,43 +9,57 @@ import (
 	"murl/internal/service"
 
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
-}
 
-func run() error {
+	// Логгер ZAP
+	zapLogger, _ := zap.NewProduction()
+	defer func() {
+		if err := zapLogger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
+
 	// Загрузка .env
 	_ = godotenv.Load()
 
 	// Конфигурация
 	cmdArgs := os.Args[1:]
-	cfg, err := config.GetConfig(&cmdArgs, nil)
-	fmt.Fprintf(os.Stderr, "Shortener server v%s\n", cfg.Version())
+	cfg, err := config.NewConfig(&cmdArgs, nil, zapLogger)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: cannot load config:\n%v\n", err)
-		os.Exit(500)
+		zapLogger.Sugar().Fatalw(err.Error(), "event", "start server")
 	}
+	cfg.Zap().Info("configuration initialized",
+		zap.String("version", cfg.Version()),
+		zap.String("router", cfg.RouterType()),
+	)
 
-	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
-	drv := repository.NewInMemoryDrv(cfg)
+	// Запускаем программу
+	if err := run(cfg); err != nil {
+		cfg.Zap().Fatal("server terminated with error", zap.Error(err))
+	}
+}
 
-	// Схема хранилища: Записать строку в БД и получить строковый идентификатор этой записи
-	store := repository.NewStore(cfg, drv)
+func run(cfg *config.Config) error {
+
+	// Репозиторий
+	repo := repository.NewRepo(cfg)
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
-	service := service.NewService(cfg, store)
+	srv := service.NewService(cfg, repo)
 
 	// HTTP хэндлеры, связанные вызовами с service
-	hndlrs := handlers.NewHandlers(cfg, service)
+	h := handlers.NewHandlers(cfg, srv)
 
 	// Ручки HTTP протокола
-	router := handlers.NewRouter(cfg, hndlrs)
+	router := handlers.WithLogging(cfg, handlers.NewRouter(cfg, h))
 
 	// Запуск HTTP сервера
-	fmt.Fprintf(os.Stderr, "Listen on [%s]\nShort base URL is [%s]\n", cfg.ListenAddr(), cfg.ShortBaseURL())
+	cfg.Zap().Info("Starting server",
+		zap.String("ListenAddr", cfg.ListenAddr()),
+		zap.String("ShortBaseURL", cfg.ShortBaseURL().String()),
+	)
 	return handlers.Serve(cfg, router)
 }

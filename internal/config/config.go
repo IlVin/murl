@@ -6,22 +6,35 @@ import (
 	"net"
 	"net/url"
 	"os"
+
+	"go.uber.org/zap"
 )
+
+// +------------------+
+// |    IZapLogger    |
+// +------------------+
+// Интерфейс для быстрого эмбеддинга
+type IZapLogger interface {
+	Zap() *zap.Logger
+}
 
 // +--------------------------+
 // |  Config - иммутабельный  |
 // +--------------------------+
 type Config struct {
-	routerType   string
+	zap          *zap.Logger
 	version      string
 	listenAddr   SocketAddr
 	shortBaseURL ShortBaseURL
+	routerType   string
+	repoDrv      string
+	shardSize    byte
 }
 
 type LookupEnvFunc func(key string) (string, bool)
 
-// GetConfig фабрика конфига, которая должна вызываться один раз
-func GetConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
+// NewConfig фабрика конфига, которая должна вызываться один раз
+func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger) (*Config, error) {
 	// Подмена функции чтения переменных окружения
 	if lookupEnv == nil {
 		lookupEnv = os.LookupEnv
@@ -29,10 +42,13 @@ func GetConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 
 	// Default config
 	cfg := Config{
+		zap:          zapLogger,
 		version:      "0.0.1",
-		routerType:   "chi",
 		listenAddr:   SocketAddr{hostname: "localhost", port: "8080"},
 		shortBaseURL: ShortBaseURL{url.URL{Scheme: "http", Host: "localhost:8080", Path: "/"}},
+		routerType:   "chi",
+		repoDrv:      "InMemory",
+		shardSize:    64,
 	}
 
 	// Command line arguments
@@ -55,7 +71,7 @@ func GetConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	})
 	if cmdArgs != nil {
 		if err := fs.Parse(*cmdArgs); err != nil {
-			return cfg, fmt.Errorf("failed to parse flags: %w", err)
+			return &cfg, fmt.Errorf("failed to parse flags: %w", err)
 		}
 	}
 
@@ -63,19 +79,19 @@ func GetConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
 		addr, err := NewSocketAddr(val)
 		if err != nil {
-			return cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
+			return &cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
 		}
 		cfg = cfg.SetListenAddr(addr)
 	}
 	if val, ok := lookupEnv("BASE_URL"); ok {
 		sb, err := NewShortBaseURL(val)
 		if err != nil {
-			return cfg, fmt.Errorf("env BASE_URL error: %w", err)
+			return &cfg, fmt.Errorf("env BASE_URL error: %w", err)
 		}
 		cfg = cfg.SetShortBaseURL(sb)
 	}
 
-	return cfg, nil
+	return &cfg, nil
 }
 
 func (c Config) Version() string {
@@ -94,6 +110,14 @@ func (c Config) SetRouterType(routerType string) Config {
 	return c
 }
 
+func (c Config) RepoDrv() string {
+	return c.repoDrv
+}
+func (c Config) SetRepoDrv(repoDrv string) Config {
+	c.repoDrv = repoDrv
+	return c
+}
+
 func (c Config) ListenAddr() string {
 	return c.listenAddr.String()
 }
@@ -102,12 +126,28 @@ func (c Config) SetListenAddr(listenAddr SocketAddr) Config {
 	return c
 }
 
-func (c Config) ShortBaseURL() string {
-	return c.shortBaseURL.String()
+func (c Config) ShortBaseURL() ShortBaseURL {
+	return c.shortBaseURL
 }
 func (c Config) SetShortBaseURL(sb ShortBaseURL) Config {
 	c.shortBaseURL.URL = sb.URL
-	c.shortBaseURL.URL.User = nil
+	c.shortBaseURL.User = nil
+	return c
+}
+
+func (c Config) ShardSize() byte {
+	return c.shardSize
+}
+func (c Config) SetShardSize(shardSize byte) Config {
+	c.shardSize = shardSize
+	return c
+}
+
+func (c Config) Zap() *zap.Logger {
+	return c.zap
+}
+func (c Config) SetZap(zapLogger *zap.Logger) Config {
+	c.zap = zapLogger
 	return c
 }
 
