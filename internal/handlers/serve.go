@@ -21,6 +21,7 @@ type IServeConfig interface {
 // Интерфейс, в котором описаны методы объекта, необходимые
 // для конфигурирования Router'а
 type MicroURLHandlers interface {
+	HndlAPIShorten() http.HandlerFunc
 	HndlAddURL() http.HandlerFunc
 	HndlGetURL() http.HandlerFunc
 	HndlDefault() http.HandlerFunc
@@ -46,6 +47,7 @@ func NewRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	cfg.Zap().Info("Used http.ServeMux router")
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/shorten", s.HndlAPIShorten())
 	mux.HandleFunc("POST /{$}", s.HndlAddURL())
 	mux.HandleFunc("GET /{id}", s.HndlGetURL())
 	mux.HandleFunc("/", s.HndlDefault())
@@ -57,6 +59,7 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	cfg.Zap().Info("Used chi router")
 	r := chi.NewRouter()
+	r.Post("/api/shorten", s.HndlAPIShorten())
 	r.Post("/", s.HndlAddURL())
 	r.Get("/{id}", s.HndlGetURL())
 	r.NotFound(s.HndlDefault())

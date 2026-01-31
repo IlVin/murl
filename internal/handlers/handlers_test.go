@@ -44,6 +44,51 @@ func (e *errReader) Read(p []byte) (n int, err error) {
 }
 func (e *errReader) Close() error { return nil }
 
+func TestHandlers_HndlAPIShorten(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := mockCfg{logger: logger}
+
+	t.Run("success 201", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		longURL := "https://google.com"
+		shortURL := "http://localhost:8080/AAA"
+
+		svc.On("AddURL", longURL).Return(shortURL, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("{\"url\":\""+longURL+"\"}"))
+		req.Header["Content-Type"] = []string{"application/json"}
+		w := httptest.NewRecorder()
+
+		h.HndlAPIShorten()(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+		assert.Equal(t, "{\"result\":\""+shortURL+"\"}", w.Body.String())
+	})
+
+	t.Run("read body error 500", func(t *testing.T) {
+		h := NewHandlers(cfg, nil)
+		req := httptest.NewRequest(http.MethodPost, "/", &errReader{})
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("service error 400", func(t *testing.T) {
+		svc := new(mockService)
+		h := NewHandlers(cfg, svc)
+		svc.On("AddURL", mock.Anything).Return("", errors.New("invalid url"))
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("bad-url"))
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
 func TestHandlers_HndlAddURL(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := mockCfg{logger: logger}

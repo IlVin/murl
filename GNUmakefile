@@ -1,8 +1,8 @@
 # Переменные проекта
-BINARY_NAME=shortener
-MAIN_PATH=./cmd/shortener/main.go # Путь может отличаться, проверь его
-COVER_FILE=coverage.out
 WORKDIR=.
+BINARY_NAME=${WORKDIR}/cmd/shortener/shortener
+MAIN_PATH=${WORKDIR}/cmd/shortener/main.go # Путь может отличаться, проверь его
+COVER_FILE=coverage.out
 DOCKER_IMG=shortener:latest
 
 .PHONY: all build run test cover clean lint help
@@ -79,21 +79,24 @@ help:
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
 
 iter1:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration1$$ -binary-path=${WORKDIR}/cmd/shortener/shortener
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration1$$ -binary-path=${BINARY_NAME}
 
 iter2:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration2$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration2$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal
 
 iter3:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration3$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration3$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal
 
 iter4:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration4$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal -server-port=8080
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration4$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
 
 iter5:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration5$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal -server-port=8080
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration5$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
 
 iter6:
-	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration6$$ -binary-path=${WORKDIR}/cmd/shortener/shortener -source-path=${WORKDIR}/internal -server-port=8080
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration6$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
+
+iter7:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration7$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
 
 
