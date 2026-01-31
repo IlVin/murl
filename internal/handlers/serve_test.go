@@ -16,6 +16,9 @@ type mockHandlers struct {
 	called bool
 }
 
+func (m *mockHandlers) HndlAPIShorten() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
+}
 func (m *mockHandlers) HndlAddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
@@ -70,7 +73,6 @@ func TestServe(t *testing.T) {
 	// Запускаем сервер в горутине, так как ListenAndServe блокирует поток
 	go func() {
 		err := Serve(cfg, mux)
-		// Ошибка будет при закрытии сервера, это нормально
 		if err != nil && err != http.ErrServerClosed {
 			return
 		}

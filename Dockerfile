@@ -2,7 +2,7 @@
 FROM scratch
 
 # Копируем наш предварительно собранный статичный бинарник
-COPY shortener /shortener
+COPY ./cmd/shortener/shortener /shortener
 
 # Если сервис использует SSL (https), могут понадобиться сертификаты
 # Их можно скопировать из хостовой системы, если нужно:

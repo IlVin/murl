@@ -47,6 +47,7 @@ func WithLogging(cfg IServeConfig, h http.Handler) http.Handler {
 			zap.String("uri", r.RequestURI),
 			zap.String("method", r.Method),
 			zap.Int("status", wrapper.statusCode),
+			zap.String("Content-Type", r.Header.Get("Content-Type")),
 			zap.Int("size", wrapper.respBodySize),
 			zap.Duration("duration", time.Since(start)),
 		)
