@@ -99,4 +99,8 @@ iter6:
 iter7:
 	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration7$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
 
+iter8:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration8$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080
+
+
 
