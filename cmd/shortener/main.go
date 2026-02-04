@@ -38,7 +38,7 @@ func main() {
 	)
 
 	// Запускаем программу
-	if err := run(cfg); err != nil {
+	if err := run(&cfg); err != nil {
 		cfg.Zap().Fatal("server terminated with error", zap.Error(err))
 	}
 }
@@ -47,6 +47,7 @@ func run(cfg *config.Config) error {
 
 	// Репозиторий
 	repo := repository.NewRepo(cfg)
+	defer repo.Close()
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
 	srv := service.NewService(cfg, repo)

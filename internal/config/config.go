@@ -30,12 +30,13 @@ type Config struct {
 	repoDrv                  string
 	shardSize                byte
 	compressibleContentTypes map[string]struct{}
+	eventStoragePath         string
 }
 
 type LookupEnvFunc func(key string) (string, bool)
 
 // NewConfig фабрика конфига, которая должна вызываться один раз
-func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger) (*Config, error) {
+func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger) (Config, error) {
 	// Подмена функции чтения переменных окружения
 	if lookupEnv == nil {
 		lookupEnv = os.LookupEnv
@@ -56,6 +57,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 			"text/css":               {},
 			"application/javascript": {},
 		},
+		eventStoragePath: "",
 	}
 
 	// Command line arguments
@@ -76,9 +78,21 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 		cfg = cfg.SetShortBaseURL(sbURL)
 		return nil
 	})
+	fs.Func("f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
+		if s == "" {
+			return nil
+		}
+		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			return fmt.Errorf("invalid path to event storage: %w", err)
+		}
+		defer fh.Close()
+		cfg = cfg.SetEventStoragePath(s)
+		return nil
+	})
 	if cmdArgs != nil {
 		if err := fs.Parse(*cmdArgs); err != nil {
-			return &cfg, fmt.Errorf("failed to parse flags: %w", err)
+			return cfg, fmt.Errorf("failed to parse flags: %w", err)
 		}
 	}
 
@@ -86,19 +100,37 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
 		addr, err := NewSocketAddr(val)
 		if err != nil {
-			return &cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
+			return cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
 		}
 		cfg = cfg.SetListenAddr(addr)
 	}
 	if val, ok := lookupEnv("BASE_URL"); ok {
 		sb, err := NewShortBaseURL(val)
 		if err != nil {
-			return &cfg, fmt.Errorf("env BASE_URL error: %w", err)
+			return cfg, fmt.Errorf("env BASE_URL error: %w", err)
 		}
 		cfg = cfg.SetShortBaseURL(sb)
 	}
+	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok {
+		if s != "" {
+			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				return cfg, fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
+			}
+			defer fh.Close()
+			cfg = cfg.SetEventStoragePath(s)
+		}
+	}
 
-	return &cfg, nil
+	return cfg, nil
+}
+
+func (c Config) EventStoragePath() string {
+	return c.eventStoragePath
+}
+func (c Config) SetEventStoragePath(eventStoragePath string) Config {
+	c.eventStoragePath = eventStoragePath
+	return c
 }
 
 func (c Config) CompressibleContentTypes() map[string]struct{} {

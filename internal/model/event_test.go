@@ -71,15 +71,6 @@ func TestFactories(t *testing.T) {
 		assert.Nil(t, payload)
 	})
 
-	t.Run("NewPayload", func(t *testing.T) {
-		p, err := NewPayload(EvAddURL)
-		assert.NoError(t, err)
-		assert.IsType(t, &PayloadAddURL{}, p)
-
-		p, err = NewPayload(EvUnknown)
-		assert.ErrorIs(t, err, ErrEvPayloadNotImpl)
-		assert.Nil(t, p)
-	})
 }
 
 // 3. Тестирование методов TEvent (Set/Get Payload)

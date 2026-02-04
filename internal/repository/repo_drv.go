@@ -22,6 +22,7 @@ type IRepoDrvConfig interface {
 type IRepoDrv interface {
 	UpSert(shardID byte, str string) (uint64, error)
 	Select(shardID byte, idx uint64) (string, error)
+	Set(shardID byte, idx uint64, u string) error
 }
 
 func NewRepoDrv(cfg IRepoDrvConfig) IRepoDrv {
@@ -104,6 +105,33 @@ func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
 	shard.mu.Unlock()
 
 	return idx, nil
+}
+
+func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
+	if int(shardID) >= len(s.shards) {
+		s.zap.Error("shard access out of bounds",
+			zap.Uint8("received", shardID),
+			zap.Int("limit", len(s.shards)),
+		)
+		return ErrOutOfRange
+	}
+
+	shard := &s.shards[shardID]
+
+	shard.mu.Lock()
+	if idx == uint64(len(shard.data)) {
+		shard.data = append(shard.data, u)
+	} else if idx > uint64(len(shard.data)) {
+		newTail := make([]string, idx-uint64(len(shard.data)+1))
+		shard.data = append(shard.data, newTail...)
+		shard.data[idx] = u
+	} else {
+		shard.data[idx] = u
+	}
+	shard.index[u] = idx
+	shard.mu.Unlock()
+
+	return nil
 }
 
 // По строке-идентификатору возвращает ранее записанную строку

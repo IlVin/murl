@@ -81,18 +81,6 @@ type PayloadAddURL struct {
 	URL     string `json:"url"`
 }
 
-// ---------  Фабрика Payload ---------
-// NewPayload возвращает "пустой" указатель на структуру данных для конкретного типа события.
-
-func NewPayload(t EvType) (any, error) {
-	rType, err := getReflectByEvType(t) // Возвращает всегда ссылку на тип
-	if err != nil {
-		return nil, err
-	}
-	// reflect.New(rType.Elem()).Interface() генерирует ссылку на тип, поэтому нужно передать строго тип
-	return reflect.New(rType.Elem()).Interface(), nil
-}
-
 // =========  Интерфейс IEvent  =========
 // Разнотипные события храним в одно слайсе типа IEvent
 
@@ -178,7 +166,6 @@ func (e *pvtTEvent) SetPayload(src any) error {
 		return fmt.Errorf("cannot set payload: %w", err)
 	}
 	sType := reflect.TypeOf(src)
-	fmt.Printf("Val: %v -> %v", sType, rType)
 	if sType != rType {
 		return ErrEvNotCompPayloadType
 	}
