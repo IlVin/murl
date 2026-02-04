@@ -22,13 +22,14 @@ type IZapLogger interface {
 // |  Config - иммутабельный  |
 // +--------------------------+
 type Config struct {
-	zap          *zap.Logger
-	version      string
-	listenAddr   SocketAddr
-	shortBaseURL ShortBaseURL
-	routerType   string
-	repoDrv      string
-	shardSize    byte
+	zap                      *zap.Logger
+	version                  string
+	listenAddr               SocketAddr
+	shortBaseURL             ShortBaseURL
+	routerType               string
+	repoDrv                  string
+	shardSize                byte
+	compressibleContentTypes map[string]struct{}
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -49,6 +50,12 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 		routerType:   "chi",
 		repoDrv:      "InMemory",
 		shardSize:    64,
+		compressibleContentTypes: map[string]struct{}{
+			"application/json":       {},
+			"text/html":              {},
+			"text/css":               {},
+			"application/javascript": {},
+		},
 	}
 
 	// Command line arguments
@@ -92,6 +99,14 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 	}
 
 	return &cfg, nil
+}
+
+func (c Config) CompressibleContentTypes() map[string]struct{} {
+	return c.compressibleContentTypes
+}
+func (c Config) SetCompressibleContentTypes(compressibleContentTypes map[string]struct{}) Config {
+	c.compressibleContentTypes = compressibleContentTypes
+	return c
 }
 
 func (c Config) Version() string {

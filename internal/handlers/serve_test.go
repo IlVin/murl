@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"murl/internal/config"
+	"murl/internal/handlers/middleware"
 	"net/http"
 	"testing"
 	"time"
@@ -91,6 +92,6 @@ func TestWithLoggingIntegration(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := WithLogging(cfg, next)
+	handler := middleware.WithLogging(cfg, next)
 	assert.NotNil(t, handler)
 }
