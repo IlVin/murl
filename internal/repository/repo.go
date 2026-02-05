@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"murl/internal/config"
-	"murl/internal/model"
+	"murl/internal/model/event"
 	"os"
 
 	"github.com/cespare/xxhash/v2"
@@ -35,7 +35,7 @@ type Repo struct {
 	zap       *zap.Logger
 	shardSize byte
 	db        RepoDataDrv
-	events    chan model.Event
+	events    chan event.Event
 }
 
 // Конструктор хранилища с драйвером
@@ -47,7 +47,7 @@ func NewRepo(cfg RepoConfig) *Repo {
 		zap:       cfg.Zap(),
 		shardSize: cfg.ShardSize(),
 		db:        drv,
-		events:    make(chan model.Event, 100),
+		events:    make(chan event.Event, 100),
 	}
 
 	r.LoadStoredEvents(cfg)
@@ -121,19 +121,19 @@ func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 	scanner := bufio.NewScanner(fh)
 
 	for scanner.Scan() {
-		event, err := model.Parse(scanner.Bytes())
+		evt, err := event.Parse(scanner.Bytes())
 		if err != nil {
 			cfg.Zap().Error("cannot parse event",
 				zap.Error(err),
 			)
 		}
-		p := &model.PayloadAddURL{}
+		p := event.PayloadAddURL{}
 		if err != nil {
 			cfg.Zap().Error("cannot parse event",
 				zap.Error(err),
 			)
 		}
-		err = event.GetPayload(p)
+		err = evt.GetPayload(&p)
 		if err != nil {
 			cfg.Zap().Error("cannot parse event",
 				zap.Error(err),
@@ -149,21 +149,14 @@ func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 }
 
 func (r *Repo) SendAddURLEvent(sID byte, idx uint64, u string) error {
-	event, payload, err := model.NewEvent[model.PayloadAddURL]()
-	if err != nil {
-		return errors.Join(ErrAddURLEventNotSent, err)
+	payload := event.PayloadAddURL{
+		ShardID: sID,
+		ID:      idx,
+		URL:     u,
 	}
 
-	payload.URL = u
-	payload.ShardID = sID
-	payload.ID = idx
-
-	err = event.SetPayload(payload)
+	event, err := event.MakeEvent(payload)
 	if err != nil {
-		r.zap.Warn("cannot create event",
-			zap.String("long_url", u),
-			zap.Error(err),
-		)
 		return errors.Join(ErrAddURLEventNotSent, err)
 	}
 
@@ -173,7 +166,7 @@ func (r *Repo) SendAddURLEvent(sID byte, idx uint64, u string) error {
 	return nil
 }
 
-func eventSaver(cfg RepoConfig, ch <-chan model.Event) {
+func eventSaver(cfg RepoConfig, ch <-chan event.Event) {
 	// Если писать в файл не надо, то просто вычитываем канал
 	if cfg.EventStoragePath() == "" {
 		for range ch {

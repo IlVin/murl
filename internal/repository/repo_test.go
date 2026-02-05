@@ -2,7 +2,7 @@ package repository
 
 import (
 	"errors"
-	"murl/internal/model"
+	"murl/internal/model/event"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,7 +55,7 @@ func TestRepo_BasicOperations(t *testing.T) {
 		zap:       zap.NewNop(),
 		shardSize: 64,
 		db:        drv,
-		events:    make(chan model.Event, 10),
+		events:    make(chan event.Event, 10),
 	}
 
 	t.Run("Save Success", func(t *testing.T) {
@@ -100,8 +100,9 @@ func TestEventSaver_Scenarios(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return("")
 
-		ch := make(chan model.Event, 1)
-		ev, _, _ := model.NewEvent[model.PayloadAddURL]()
+		ch := make(chan event.Event, 1)
+		p := event.PayloadAddURL{}
+		ev, _ := event.MakeEvent(p)
 		ch <- ev
 		close(ch)
 
@@ -112,7 +113,7 @@ func TestEventSaver_Scenarios(t *testing.T) {
 	t.Run("Invalid path - panic", func(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return("/non/existent/path/file.log")
-		ch := make(chan model.Event)
+		ch := make(chan event.Event)
 		assert.Panics(t, func() { eventSaver(cfg, ch) })
 	})
 
@@ -121,7 +122,7 @@ func TestEventSaver_Scenarios(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return(tmp)
 
-		ch := make(chan model.Event, 1)
+		ch := make(chan event.Event, 1)
 		// Используем пустое событие или мок, чтобы вызвать ошибку Serialize
 		// В вашей реализации pvtEvent Serialize падает редко, но мы проверим ветку лога
 		ev := &brokenEvent{}
@@ -152,11 +153,12 @@ func TestRecovery_Scenarios(t *testing.T) {
 	t.Run("Successful Recovery", func(t *testing.T) {
 		tmp := filepath.Join(t.TempDir(), "recovery.log")
 		// Готовим файл с одним событием
-		ev, p, _ := model.NewEvent[model.PayloadAddURL]()
-		p.URL = "http://test.com"
-		p.ID = 10
-		p.ShardID = 1
-		ev.SetPayload(p)
+		p := event.PayloadAddURL{
+			URL:     "http://test.com",
+			ID:      10,
+			ShardID: 1,
+		}
+		ev, _ := event.MakeEvent(p)
 		data, _ := ev.Serialize()
 		os.WriteFile(tmp, append(data, 0x0A), 0666)
 
@@ -195,6 +197,6 @@ func TestNewRepo_Functional(t *testing.T) {
 }
 
 // Вспомогательный тип для ошибки сериализации
-type brokenEvent struct{ model.Event }
+type brokenEvent struct{ event.Event }
 
 func (b *brokenEvent) Serialize() ([]byte, error) { return nil, errors.New("fail") }
