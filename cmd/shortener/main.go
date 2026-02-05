@@ -1,11 +1,11 @@
 package main
 
 import (
+	"log"
 	"os"
 
 	"murl/internal/config"
 	"murl/internal/handlers"
-	"murl/internal/handlers/middleware"
 	"murl/internal/repository"
 	"murl/internal/service"
 
@@ -19,7 +19,7 @@ func main() {
 	zapLogger, _ := zap.NewProduction()
 	defer func() {
 		if err := zapLogger.Sync(); err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	}()
 
@@ -56,11 +56,7 @@ func run(cfg *config.Config) error {
 	h := handlers.NewHandlers(cfg, srv)
 
 	// Ручки HTTP протокола
-	router := middleware.WithLogging(cfg,
-		middleware.WithCompress(cfg,
-			handlers.NewRouter(cfg, h),
-		),
-	)
+	router := handlers.NewRouter(cfg, h)
 
 	// Запуск HTTP сервера
 	cfg.Zap().Info("Starting server",

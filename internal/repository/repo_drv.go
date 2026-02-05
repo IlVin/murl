@@ -13,19 +13,19 @@ var (
 	ErrDBRecordNotFound = errors.New("record not found")
 )
 
-type IRepoDrvConfig interface {
-	config.IZapLogger
+type RepoDrvConfig interface {
+	config.ZapLogger
 	RepoDrv() string
 	ShardSize() byte
 }
 
-type IRepoDrv interface {
+type RepoDrv interface {
 	UpSert(shardID byte, str string) (uint64, error)
 	Select(shardID byte, idx uint64) (string, error)
 	Set(shardID byte, idx uint64, u string) error
 }
 
-func NewRepoDrv(cfg IRepoDrvConfig) IRepoDrv {
+func NewRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	switch cfg.RepoDrv() {
 	case "InMemory":
 		return newInMemoryRepoDrv(cfg)
@@ -55,7 +55,7 @@ type InMemoryRepoDrv struct {
 	shards []inMemoryShard
 }
 
-func newInMemoryRepoDrv(cfg IRepoDrvConfig) IRepoDrv {
+func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	shardSize := int(cfg.ShardSize())
 
 	s := &InMemoryRepoDrv{
@@ -159,7 +159,7 @@ func (s *InMemoryRepoDrv) Select(shardID byte, idx uint64) (string, error) {
 //
 // =============================================
 // Заглушка. Драйвер будет разработан позже
-func newPgRepoDrv(cfg IRepoDrvConfig) IRepoDrv {
+func newPgRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	cfg.Zap().Info("Use PgDrv")
 	return newInMemoryRepoDrv(cfg)
 }

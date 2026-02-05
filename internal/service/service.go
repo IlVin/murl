@@ -18,8 +18,8 @@ var (
 )
 
 // Объявляем список используемых параметров конфига
-type IServiceConfig interface {
-	config.IZapLogger
+type ServiceConfig interface {
+	config.ZapLogger
 	ShortBaseURL() config.ShortBaseURL
 }
 
@@ -34,7 +34,7 @@ type Service struct {
 	repo         MicroURLRepo
 }
 
-func NewService(cfg IServiceConfig, repo MicroURLRepo) *Service {
+func NewService(cfg ServiceConfig, repo MicroURLRepo) *Service {
 	return &Service{
 		zap:          cfg.Zap(),
 		shortBaseURL: cfg.ShortBaseURL(),

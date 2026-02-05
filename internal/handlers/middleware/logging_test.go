@@ -30,7 +30,7 @@ func TestWithLogging(t *testing.T) {
 		content := "test data"
 		handlerToTest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Проверяем, что метрики доступны в контексте
-			m, ok := r.Context().Value(ctxMetricsKey).(*TMetrics)
+			m, ok := r.Context().Value(ctxMetricsKey).(*Metrics)
 			assert.True(t, ok)
 
 			// Эмулируем работу другого middleware (например, сжатия)
@@ -42,7 +42,7 @@ func TestWithLogging(t *testing.T) {
 			_, _ = w.Write([]byte(content))
 		})
 
-		h := WithLogging(cfg, handlerToTest)
+		h := WithLogging(cfg)(handlerToTest)
 
 		r := httptest.NewRequest(http.MethodGet, "/test-uri", nil)
 		w := httptest.NewRecorder()
@@ -74,7 +74,7 @@ func TestWithLogging(t *testing.T) {
 			_, _ = w.Write([]byte("ok"))
 		})
 
-		h := WithLogging(cfg, handlerToTest)
+		h := WithLogging(cfg)(handlerToTest)
 		r := httptest.NewRequest(http.MethodPost, "/default", nil)
 		w := httptest.NewRecorder()
 

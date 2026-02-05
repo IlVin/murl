@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"murl/internal/config"
+	"murl/internal/handlers/middleware"
 	"net/http"
 
 	chi "github.com/go-chi/chi/v5"
@@ -9,12 +10,14 @@ import (
 
 // Объявляем список используемых параметров конфига
 type RouterConfig interface {
-	config.IZapLogger
+	config.ZapLogger
+	middleware.CompressConfig
+	middleware.LoggingConfig
 	RouterType() string
 }
 
 type IServeConfig interface {
-	config.IZapLogger
+	config.ZapLogger
 	ListenAddr() string
 }
 
@@ -52,13 +55,24 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	mux.HandleFunc("GET /{id}", s.HndlGetURL())
 	mux.HandleFunc("/", s.HndlDefault())
 
-	return mux
+	// Middlewares
+	return middleware.WithLogging(cfg)(
+		middleware.WithCompress(cfg)(
+			mux,
+		),
+	)
 }
 
 // Возвращает настроенный chi.Router
 func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	cfg.Zap().Info("Used chi router")
 	r := chi.NewRouter()
+
+	// Middlewares
+	r.Use(middleware.WithLogging(cfg))
+	r.Use(middleware.WithCompress(cfg))
+
+	// Routes
 	r.Post("/api/shorten", s.HndlAPIShorten())
 	r.Post("/", s.HndlAddURL())
 	r.Get("/{id}", s.HndlGetURL())

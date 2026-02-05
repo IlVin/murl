@@ -27,7 +27,7 @@ func (m *mockRepo) Load(sID byte, idx uint64) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-// mockCfg реализует IServiceConfig
+// mockCfg реализует ServiceConfig
 type mockCfg struct {
 	baseURL string
 	logger  *zap.Logger

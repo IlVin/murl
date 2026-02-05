@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// mockDrvConfig реализует интерфейс IRepoDrvConfig
+// mockDrvConfig реализует интерфейс RepoDrvConfig
 type mockDrvConfig struct {
 	drv       string
 	shardSize byte

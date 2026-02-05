@@ -19,27 +19,27 @@ var (
 )
 
 // Объявляем список используемых параметров конфига
-type IRepoConfig interface {
-	config.IZapLogger
-	IRepoDrvConfig
+type RepoConfig interface {
+	config.ZapLogger
+	RepoDrvConfig
 	EventStoragePath() string
 }
 
 // Поддерживаем драйвера, которые работают с шардами
 // Т.е. идентификатор 2х мерный: shardID + record_id
-type IRepoDataDrv interface {
-	IRepoDrv
+type RepoDataDrv interface {
+	RepoDrv
 }
 
 type Repo struct {
 	zap       *zap.Logger
 	shardSize byte
-	db        IRepoDataDrv
-	events    chan model.IEvent
+	db        RepoDataDrv
+	events    chan model.Event
 }
 
 // Конструктор хранилища с драйвером
-func NewRepo(cfg IRepoConfig) *Repo {
+func NewRepo(cfg RepoConfig) *Repo {
 	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
 	drv := NewRepoDrv(cfg)
 
@@ -47,7 +47,7 @@ func NewRepo(cfg IRepoConfig) *Repo {
 		zap:       cfg.Zap(),
 		shardSize: cfg.ShardSize(),
 		db:        drv,
-		events:    make(chan model.IEvent, 100),
+		events:    make(chan model.Event, 100),
 	}
 
 	r.LoadStoredEvents(cfg)
@@ -103,7 +103,7 @@ func (r *Repo) Close() {
 	close(r.events)
 }
 
-func (r *Repo) LoadStoredEvents(cfg IRepoConfig) {
+func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 	// Если файл не задан, то выходим
 	if cfg.EventStoragePath() == "" {
 		return
@@ -173,7 +173,7 @@ func (r *Repo) SendAddURLEvent(sID byte, idx uint64, u string) error {
 	return nil
 }
 
-func eventSaver(cfg IRepoConfig, ch <-chan model.IEvent) {
+func eventSaver(cfg RepoConfig, ch <-chan model.Event) {
 	// Если писать в файл не надо, то просто вычитываем канал
 	if cfg.EventStoragePath() == "" {
 		for range ch {

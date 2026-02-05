@@ -16,27 +16,27 @@ import (
 	"go.uber.org/zap"
 )
 
-type ICompressConfig interface {
-	config.IZapLogger
+type CompressConfig interface {
+	config.ZapLogger
 	CompressibleContentTypes() map[string]struct{}
 }
 
-type TCodec struct {
+type Codec struct {
 	Name string
 	io.Writer
 	io.Closer
 	q float64
 }
 
-func NewNonCompressionCodec(w http.ResponseWriter) TCodec {
-	return TCodec{
+func NewNonCompressionCodec(w http.ResponseWriter) Codec {
+	return Codec{
 		Name:   "identity",
 		Writer: w,
 	}
 }
 
-func (cw *CompressResponseWriter) getCodec() TCodec {
-	codecs := make([]TCodec, 0, 4)
+func (cw *CompressResponseWriter) getCodec() Codec {
+	codecs := make([]Codec, 0, 4)
 
 	// Собираем кодеки из Accept-Encoding запроса
 	for _, headerValue := range cw.r.Header.Values("Accept-Encoding") {
@@ -54,7 +54,7 @@ func (cw *CompressResponseWriter) getCodec() TCodec {
 				}
 			}
 			if q > 0.0 {
-				codecs = append(codecs, TCodec{
+				codecs = append(codecs, Codec{
 					Name: name,
 					q:    q,
 				})
@@ -63,7 +63,7 @@ func (cw *CompressResponseWriter) getCodec() TCodec {
 	}
 
 	// Сортируем по q
-	slices.SortStableFunc(codecs, func(a, b TCodec) int {
+	slices.SortStableFunc(codecs, func(a, b Codec) int {
 		return cmp.Compare(b.q, a.q)
 	})
 
@@ -99,7 +99,7 @@ type CompressResponseWriter struct {
 	r                        *http.Request
 	compressibleContentTypes map[string]struct{}
 	headerWritten            bool
-	codec                    TCodec
+	codec                    Codec
 	zap                      *zap.Logger
 	pools                    map[string]*sync.Pool
 }
@@ -120,8 +120,8 @@ func (cw *CompressResponseWriter) Header() http.Header {
 }
 
 // Metrics - указатель на структуру метрик. По умолчанию nil
-func (cw *CompressResponseWriter) Metrics() *TMetrics {
-	m, ok := cw.r.Context().Value(ctxMetricsKey).(*TMetrics)
+func (cw *CompressResponseWriter) Metrics() *Metrics {
+	m, ok := cw.r.Context().Value(ctxMetricsKey).(*Metrics)
 	if !ok {
 		return nil
 	}
@@ -214,77 +214,79 @@ func (w *readCloserWrapper) Close() error {
 	return w.closer()
 }
 
-func WithCompress(cfg ICompressConfig, h http.Handler) http.Handler {
-	compressibleContentTypes := cfg.CompressibleContentTypes()
+func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		compressibleContentTypes := cfg.CompressibleContentTypes()
 
-	// Пулы для чтения (распаковка запроса)
-	rPools := map[string]*sync.Pool{
-		"gzip":    {New: func() any { return new(gzip.Reader) }},
-		"deflate": {New: func() any { return flate.NewReader(nil) }},
-	}
-
-	wPools := map[string]*sync.Pool{
-		"br":      {New: func() any { return brotli.NewWriter(nil) }},
-		"gzip":    {New: func() any { w, _ := gzip.NewWriterLevel(nil, gzip.DefaultCompression); return w }},
-		"deflate": {New: func() any { w, _ := flate.NewWriter(nil, flate.DefaultCompression); return w }},
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		encoding := strings.ToLower(r.Header.Get("Content-Encoding"))
-
-		// Обработка сжатого тела запроса
-		if encoding != "" && encoding != "identity" {
-			var decompressedBody io.ReadCloser
-			oldBody := r.Body
-
-			switch encoding {
-			case "gzip":
-				zr := rPools["gzip"].Get().(*gzip.Reader)
-				if err := zr.Reset(oldBody); err != nil {
-					cfg.Zap().Error("gzip reset error", zap.Error(err))
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				decompressedBody = &readCloserWrapper{
-					Reader: zr,
-					closer: func() error {
-						if err := zr.Close(); err != nil {
-							cfg.Zap().Error("gzip close error", zap.Error(err))
-						}
-						rPools["gzip"].Put(zr)
-						return oldBody.Close()
-					},
-				}
-			case "deflate":
-				fr := rPools["deflate"].Get().(flate.Resetter)
-				if err := fr.Reset(oldBody, nil); err != nil {
-					cfg.Zap().Error("deflate reset error", zap.Error(err))
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				decompressedBody = &readCloserWrapper{
-					Reader: fr.(io.Reader),
-					closer: func() error {
-						rPools["deflate"].Put(fr)
-						return oldBody.Close()
-					},
-				}
-
-			case "br":
-				br := brotli.NewReader(oldBody)
-				decompressedBody = &readCloserWrapper{
-					Reader: br,
-					closer: oldBody.Close,
-				}
-			}
-
-			if decompressedBody != nil {
-				r.Body = decompressedBody
-			}
+		// Пулы для чтения (распаковка запроса)
+		rPools := map[string]*sync.Pool{
+			"gzip":    {New: func() any { return new(gzip.Reader) }},
+			"deflate": {New: func() any { return flate.NewReader(nil) }},
 		}
 
-		cw := NewCompressResponseWriter(cfg.Zap(), w, r, compressibleContentTypes, wPools)
-		defer cw.Close()
-		h.ServeHTTP(cw, r)
-	})
+		wPools := map[string]*sync.Pool{
+			"br":      {New: func() any { return brotli.NewWriter(nil) }},
+			"gzip":    {New: func() any { w, _ := gzip.NewWriterLevel(nil, gzip.DefaultCompression); return w }},
+			"deflate": {New: func() any { w, _ := flate.NewWriter(nil, flate.DefaultCompression); return w }},
+		}
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			encoding := strings.ToLower(r.Header.Get("Content-Encoding"))
+
+			// Обработка сжатого тела запроса
+			if encoding != "" && encoding != "identity" {
+				var decompressedBody io.ReadCloser
+				oldBody := r.Body
+
+				switch encoding {
+				case "gzip":
+					zr := rPools["gzip"].Get().(*gzip.Reader)
+					if err := zr.Reset(oldBody); err != nil {
+						cfg.Zap().Error("gzip reset error", zap.Error(err))
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					decompressedBody = &readCloserWrapper{
+						Reader: zr,
+						closer: func() error {
+							if err := zr.Close(); err != nil {
+								cfg.Zap().Error("gzip close error", zap.Error(err))
+							}
+							rPools["gzip"].Put(zr)
+							return oldBody.Close()
+						},
+					}
+				case "deflate":
+					fr := rPools["deflate"].Get().(flate.Resetter)
+					if err := fr.Reset(oldBody, nil); err != nil {
+						cfg.Zap().Error("deflate reset error", zap.Error(err))
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					decompressedBody = &readCloserWrapper{
+						Reader: fr.(io.Reader),
+						closer: func() error {
+							rPools["deflate"].Put(fr)
+							return oldBody.Close()
+						},
+					}
+
+				case "br":
+					br := brotli.NewReader(oldBody)
+					decompressedBody = &readCloserWrapper{
+						Reader: br,
+						closer: oldBody.Close,
+					}
+				}
+
+				if decompressedBody != nil {
+					r.Body = decompressedBody
+				}
+			}
+
+			cw := NewCompressResponseWriter(cfg.Zap(), w, r, compressibleContentTypes, wPools)
+			defer cw.Close()
+			h.ServeHTTP(cw, r)
+		})
+	}
 }

@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// mockService реализует интерфейс IMicroURLService
+// mockService реализует интерфейс MicroURLService
 type mockService struct {
 	mock.Mock
 }
@@ -27,7 +27,7 @@ func (m *mockService) GetURL(url string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-// mockCfg реализует интерфейс IHandlersConfig
+// mockCfg реализует интерфейс HandlersConfig
 type mockCfg struct {
 	logger *zap.Logger
 }

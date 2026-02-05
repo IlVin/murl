@@ -32,7 +32,7 @@ func (m *mockHandlers) HndlDefault() http.HandlerFunc {
 
 // mockServeCfg для теста функции Serve
 type mockServeCfg struct {
-	config.IZapLogger
+	config.ZapLogger
 	addr string
 }
 
@@ -92,6 +92,6 @@ func TestWithLoggingIntegration(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := middleware.WithLogging(cfg, next)
+	handler := middleware.WithLogging(cfg)(next)
 	assert.NotNil(t, handler)
 }

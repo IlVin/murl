@@ -55,7 +55,7 @@ func TestRepo_BasicOperations(t *testing.T) {
 		zap:       zap.NewNop(),
 		shardSize: 64,
 		db:        drv,
-		events:    make(chan model.IEvent, 10),
+		events:    make(chan model.Event, 10),
 	}
 
 	t.Run("Save Success", func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestEventSaver_Scenarios(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return("")
 
-		ch := make(chan model.IEvent, 1)
+		ch := make(chan model.Event, 1)
 		ev, _, _ := model.NewEvent[model.PayloadAddURL]()
 		ch <- ev
 		close(ch)
@@ -112,7 +112,7 @@ func TestEventSaver_Scenarios(t *testing.T) {
 	t.Run("Invalid path - panic", func(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return("/non/existent/path/file.log")
-		ch := make(chan model.IEvent)
+		ch := make(chan model.Event)
 		assert.Panics(t, func() { eventSaver(cfg, ch) })
 	})
 
@@ -121,9 +121,9 @@ func TestEventSaver_Scenarios(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return(tmp)
 
-		ch := make(chan model.IEvent, 1)
+		ch := make(chan model.Event, 1)
 		// Используем пустое событие или мок, чтобы вызвать ошибку Serialize
-		// В вашей реализации pvtTEvent Serialize падает редко, но мы проверим ветку лога
+		// В вашей реализации pvtEvent Serialize падает редко, но мы проверим ветку лога
 		ev := &brokenEvent{}
 		ch <- ev
 		close(ch)
@@ -195,6 +195,6 @@ func TestNewRepo_Functional(t *testing.T) {
 }
 
 // Вспомогательный тип для ошибки сериализации
-type brokenEvent struct{ model.IEvent }
+type brokenEvent struct{ model.Event }
 
 func (b *brokenEvent) Serialize() ([]byte, error) { return nil, errors.New("fail") }

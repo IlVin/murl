@@ -10,22 +10,22 @@ import (
 )
 
 // Объявляем список используемых параметров конфига
-type IHandlersConfig interface {
-	config.IZapLogger
+type HandlersConfig interface {
+	config.ZapLogger
 }
 
 // Эти методы сервиса используются хэндлерами
-type IMicroURLService interface {
+type MicroURLService interface {
 	AddURL(url string) (string, error)
 	GetURL(url string) (string, error)
 }
 
 type Handlers struct {
 	zap     *zap.Logger
-	service IMicroURLService
+	service MicroURLService
 }
 
-func NewHandlers(cfg IHandlersConfig, service IMicroURLService) *Handlers {
+func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	return &Handlers{
 		zap:     cfg.Zap(),
 		service: service,
@@ -69,7 +69,7 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 }
 
 // =========== POST /api/shorten ==================
-type TAPIShortenReq struct {
+type APIShortenReq struct {
 	URL string `json:"url"`
 }
 
@@ -104,7 +104,7 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			return
 		}
 
-		var jsReq TAPIShortenReq
+		var jsReq APIShortenReq
 		var jsResp TAPIShortenResp
 
 		err = json.Unmarshal(buf, &jsReq)

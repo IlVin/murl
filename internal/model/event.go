@@ -39,8 +39,8 @@ func getReflectByEvType(t EvType) (reflect.Type, error) {
 	}
 }
 
-// =========  Фабрика IEvent  =========
-func NewEvent[T any]() (IEvent, *T, error) {
+// =========  Фабрика Event  =========
+func NewEvent[T any]() (Event, *T, error) {
 	// 1. Получаем reflect.Type для дженерика T без аллокаций
 	tType := reflect.TypeOf((*T)(nil)).Elem()
 
@@ -54,7 +54,7 @@ func NewEvent[T any]() (IEvent, *T, error) {
 	payload := new(T)
 
 	// 4. Создаем обертку события c пустым evPayload
-	event := &pvtTEvent{
+	event := &pvtEvent{
 		evID:      uuid.New(),
 		evType:    evType,
 		evPayload: nil,
@@ -81,10 +81,10 @@ type PayloadAddURL struct {
 	URL     string `json:"url"`
 }
 
-// =========  Интерфейс IEvent  =========
-// Разнотипные события храним в одно слайсе типа IEvent
+// =========  Интерфейс Event  =========
+// Разнотипные события храним в одно слайсе типа Event
 
-type IEvent interface {
+type Event interface {
 	GetID() uuid.UUID
 	GetType() EvType
 	Serialize() ([]byte, error)
@@ -92,22 +92,22 @@ type IEvent interface {
 	SetPayload(src any) error
 }
 
-// =========  Базовая реализация (pvtTEvent)  =========
+// =========  Базовая реализация (pvtEvent)  =========
 
-type pvtTEvent struct {
+type pvtEvent struct {
 	mu        sync.RWMutex
 	evID      uuid.UUID
 	evType    EvType
 	evPayload json.RawMessage
 }
 
-func (e *pvtTEvent) GetID() uuid.UUID {
+func (e *pvtEvent) GetID() uuid.UUID {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.evID
 }
 
-func (e *pvtTEvent) GetType() EvType {
+func (e *pvtEvent) GetType() EvType {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.evType
@@ -119,7 +119,7 @@ type serializeEnvelope struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-func (e *pvtTEvent) Serialize() ([]byte, error) {
+func (e *pvtEvent) Serialize() ([]byte, error) {
 	e.mu.RLock()
 	env := serializeEnvelope{
 		ID:      e.evID,
@@ -130,7 +130,7 @@ func (e *pvtTEvent) Serialize() ([]byte, error) {
 	return json.Marshal(&env)
 }
 
-func Parse(data []byte) (IEvent, error) {
+func Parse(data []byte) (Event, error) {
 	env := serializeEnvelope{}
 
 	err := json.Unmarshal(data, &env)
@@ -138,14 +138,14 @@ func Parse(data []byte) (IEvent, error) {
 		return nil, fmt.Errorf("cannot deserialize: %w", err)
 	}
 
-	return &pvtTEvent{
+	return &pvtEvent{
 		evID:      env.ID,
 		evType:    env.Type,
 		evPayload: env.Payload,
 	}, nil
 }
 
-func (e *pvtTEvent) GetPayload(dest any) error {
+func (e *pvtEvent) GetPayload(dest any) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.evPayload == nil {
@@ -154,7 +154,7 @@ func (e *pvtTEvent) GetPayload(dest any) error {
 	return json.Unmarshal(e.evPayload, dest)
 }
 
-func (e *pvtTEvent) SetPayload(src any) error {
+func (e *pvtEvent) SetPayload(src any) error {
 	if src == nil {
 		e.mu.Lock()
 		e.evPayload = nil

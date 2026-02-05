@@ -37,7 +37,7 @@ func TestWithCompress(t *testing.T) {
 		_, _ = w.Write([]byte(content))
 	})
 
-	handler := WithCompress(cfg, nextHandler)
+	handler := WithCompress(cfg)(nextHandler)
 
 	tests := []struct {
 		name           string
@@ -96,7 +96,7 @@ func TestCompress_EdgeCases(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("data"))
 		})
-		handler := WithCompress(cfg, next)
+		handler := WithCompress(cfg)(next)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip")
@@ -111,7 +111,7 @@ func TestCompress_EdgeCases(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("png-data"))
 		})
-		handler := WithCompress(cfg, next)
+		handler := WithCompress(cfg)(next)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip")
@@ -125,7 +125,7 @@ func TestCompress_EdgeCases(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte("data"))
 		})
-		handler := WithCompress(cfg, next)
+		handler := WithCompress(cfg)(next)
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip;q=invalid")
@@ -137,14 +137,14 @@ func TestCompress_EdgeCases(t *testing.T) {
 
 func TestCompress_Metrics(t *testing.T) {
 	cfg := &mockConfig{types: map[string]struct{}{"text/html": {}}}
-	metrics := &TMetrics{}
+	metrics := &Metrics{}
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("some data to compress"))
 	})
 
-	handler := WithCompress(cfg, next)
+	handler := WithCompress(cfg)(next)
 
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("Accept-Encoding", "gzip")

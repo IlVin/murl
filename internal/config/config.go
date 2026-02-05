@@ -11,10 +11,10 @@ import (
 )
 
 // +------------------+
-// |    IZapLogger    |
+// |    ZapLogger    |
 // +------------------+
 // Интерфейс для быстрого эмбеддинга
-type IZapLogger interface {
+type ZapLogger interface {
 	Zap() *zap.Logger
 }
 

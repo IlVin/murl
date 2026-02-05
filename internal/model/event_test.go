@@ -73,8 +73,8 @@ func TestFactories(t *testing.T) {
 
 }
 
-// 3. Тестирование методов TEvent (Set/Get Payload)
-func TestTEvent_PayloadHandling(t *testing.T) {
+// 3. Тестирование методов pvtEvent (Set/Get Payload)
+func TestPvtEvent_PayloadHandling(t *testing.T) {
 	ev, _, _ := NewEvent[PayloadAddURL]()
 
 	t.Run("Set and Get Success", func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestTEvent_PayloadHandling(t *testing.T) {
 	})
 
 	t.Run("Get Undefined Payload", func(t *testing.T) {
-		newEv := &pvtTEvent{evType: EvAddURL} // evPayload is nil
+		newEv := &pvtEvent{evType: EvAddURL} // evPayload is nil
 		var result PayloadAddURL
 		err := newEv.GetPayload(&result)
 		assert.ErrorIs(t, err, ErrEvPayloadUndef)
@@ -110,7 +110,7 @@ func TestTEvent_PayloadHandling(t *testing.T) {
 
 	t.Run("Set Type with Error (Mock implementation issue)", func(t *testing.T) {
 		// Создаем событие с невалидным типом вручную для покрытия ошибки в SetPayload
-		brokenEv := &pvtTEvent{evType: 999}
+		brokenEv := &pvtEvent{evType: 999}
 		err := brokenEv.SetPayload(&PayloadAddURL{})
 		assert.Contains(t, err.Error(), "cannot set payload")
 	})
