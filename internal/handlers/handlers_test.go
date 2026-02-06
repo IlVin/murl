@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 )
 
 // mockService реализует интерфейс MicroURLService
@@ -29,11 +28,6 @@ func (m *mockService) GetURL(url string) (string, error) {
 
 // mockCfg реализует интерфейс HandlersConfig
 type mockCfg struct {
-	logger *zap.Logger
-}
-
-func (m mockCfg) Zap() *zap.Logger {
-	return m.logger
 }
 
 // errReader имитирует ошибку чтения при вызове io.ReadAll
@@ -45,8 +39,7 @@ func (e *errReader) Read(p []byte) (n int, err error) {
 func (e *errReader) Close() error { return nil }
 
 func TestHandlers_HndlAPIShorten(t *testing.T) {
-	logger := zap.NewNop()
-	cfg := mockCfg{logger: logger}
+	cfg := mockCfg{}
 
 	t.Run("success 201", func(t *testing.T) {
 		svc := new(mockService)
@@ -90,8 +83,7 @@ func TestHandlers_HndlAPIShorten(t *testing.T) {
 }
 
 func TestHandlers_HndlAddURL(t *testing.T) {
-	logger := zap.NewNop()
-	cfg := mockCfg{logger: logger}
+	cfg := mockCfg{}
 
 	t.Run("success 201", func(t *testing.T) {
 		svc := new(mockService)
@@ -134,8 +126,7 @@ func TestHandlers_HndlAddURL(t *testing.T) {
 }
 
 func TestHandlers_HndlGetURL(t *testing.T) {
-	logger := zap.NewNop()
-	cfg := mockCfg{logger: logger}
+	cfg := mockCfg{}
 
 	t.Run("success redirect 307", func(t *testing.T) {
 		svc := new(mockService)
@@ -167,7 +158,7 @@ func TestHandlers_HndlGetURL(t *testing.T) {
 }
 
 func TestHandlers_HndlDefault(t *testing.T) {
-	h := NewHandlers(mockCfg{logger: zap.NewNop()}, nil)
+	h := NewHandlers(mockCfg{}, nil)
 	req := httptest.NewRequest(http.MethodPatch, "/", nil)
 	w := httptest.NewRecorder()
 
