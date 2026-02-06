@@ -8,6 +8,9 @@ import (
 	"os"
 )
 
+// +--------------------------+
+// |  Config - иммутабельный  |
+// +--------------------------+
 type Config struct {
 	version                  string
 	listenAddr               SocketAddr
@@ -203,4 +206,23 @@ func NewSocketAddr(host string) (SocketAddr, error) {
 
 func (s SocketAddr) String() string {
 	return net.JoinHostPort(s.hostname, s.port)
+}
+
+// +------------------------------+
+// | ShortBaseURL - иммутабельный |
+// +------------------------------+
+type ShortBaseURL struct {
+	url.URL
+}
+
+func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
+	sbURL, err := url.Parse(baseURL)
+	if err != nil {
+		return ShortBaseURL{}, fmt.Errorf("invalid ShortBaseURL: %w", err)
+	}
+	return ShortBaseURL{*sbURL}, nil
+}
+
+func (s ShortBaseURL) String() string {
+	return s.URL.String()
 }
