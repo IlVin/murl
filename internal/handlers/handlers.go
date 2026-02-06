@@ -3,15 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"io"
-	"murl/internal/config"
+	"log/slog"
 	"net/http"
-
-	"go.uber.org/zap"
 )
 
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
-	config.ZapLogger
 }
 
 // Эти методы сервиса используются хэндлерами
@@ -21,13 +18,11 @@ type MicroURLService interface {
 }
 
 type Handlers struct {
-	zap     *zap.Logger
 	service MicroURLService
 }
 
 func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	return &Handlers{
-		zap:     cfg.Zap(),
 		service: service,
 	}
 }
@@ -37,15 +32,15 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				h.zap.Fatal("cannot close r.Body",
-					zap.Error(err),
+				slog.Error("cannot close r.Body",
+					slog.Any("err", err),
 				)
 			}
 		}()
 		buf, err := io.ReadAll(r.Body)
 		if err != nil {
-			h.zap.Error("cannot read Body",
-				zap.Error(err),
+			slog.Error("cannot read Body",
+				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -60,9 +55,9 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 		w.Header().Add("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusCreated)
 		if _, err := w.Write([]byte(murl)); err != nil {
-			h.zap.Debug("failed to write response",
-				zap.String("event", "network_error"),
-				zap.Error(err),
+			slog.Debug("failed to write response",
+				slog.String("event", "network_error"),
+				slog.Any("err", err),
 			)
 		}
 	}
@@ -81,15 +76,15 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				h.zap.Fatal("cannot close r.Body",
-					zap.Error(err),
+				slog.Error("cannot close r.Body",
+					slog.Any("err", err),
 				)
 			}
 		}()
 
 		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
-			h.zap.Warn("invalid Content-Type",
-				zap.String("Content-Type", ct),
+			slog.Warn("invalid Content-Type",
+				slog.String("Content-Type", ct),
 			)
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -97,8 +92,8 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 
 		buf, err := io.ReadAll(r.Body)
 		if err != nil {
-			h.zap.Error("cannot read Body",
-				zap.Error(err),
+			slog.Error("cannot read Body",
+				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -109,8 +104,8 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 
 		err = json.Unmarshal(buf, &jsReq)
 		if err != nil {
-			h.zap.Warn("invalid JSON format",
-				zap.Error(err),
+			slog.Warn("invalid JSON format",
+				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -119,8 +114,8 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 		jsResp.Result, err = h.service.AddURL(jsReq.URL)
 
 		if err != nil {
-			h.zap.Warn("internal error",
-				zap.Error(err),
+			slog.Warn("internal error",
+				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -128,8 +123,8 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 
 		buf, err = json.Marshal(&jsResp)
 		if err != nil {
-			h.zap.Warn("internal error",
-				zap.Error(err),
+			slog.Warn("internal error",
+				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -138,9 +133,9 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		if _, err := w.Write(buf); err != nil {
-			h.zap.Debug("failed to write response",
-				zap.String("event", "network_error"),
-				zap.Error(err),
+			slog.Debug("failed to write response",
+				slog.String("event", "network_error"),
+				slog.Any("err", err),
 			)
 		}
 	}
@@ -151,8 +146,8 @@ func (h *Handlers) HndlGetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				h.zap.Fatal("cannot close r.Body",
-					zap.Error(err),
+				slog.Error("cannot close r.Body",
+					slog.Any("err", err),
 				)
 			}
 		}()
@@ -171,8 +166,8 @@ func (h *Handlers) HndlDefault() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				h.zap.Fatal("cannot close r.Body",
-					zap.Error(err),
+				slog.Error("cannot close r.Body",
+					slog.Any("err", err),
 				)
 			}
 		}()
