@@ -90,7 +90,7 @@ func TestRepo_BasicOperations(t *testing.T) {
 		mDrv.On("UpSert", mock.Anything, mock.Anything).Return(uint64(0), fmt.Errorf("db fail")).Once()
 		_, _, err := r.Save("http://error.com")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Failed to save URL mapping")
+		assert.Contains(t, err.Error(), "failed to save URL mapping")
 	})
 
 	t.Run("Load Not Found", func(t *testing.T) {
