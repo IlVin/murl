@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 // mockHandlers реализует интерфейс MicroURLHandlers для тестирования роутера
@@ -32,17 +31,14 @@ func (m *mockHandlers) HndlDefault() http.HandlerFunc {
 
 // mockServeCfg для теста функции Serve
 type mockServeCfg struct {
-	config.ZapLogger
 	addr string
 }
 
 func (m mockServeCfg) ListenAddr() string { return m.addr }
-func (m mockServeCfg) Zap() *zap.Logger   { return zap.NewNop() }
 
 func TestNewRouter(t *testing.T) {
-	logger := zap.NewNop()
 	// Используем NewConfig для создания базового конфига
-	baseCfg, err := config.NewConfig(nil, nil, logger)
+	baseCfg, err := config.NewConfig(nil, nil, nil)
 	require.NoError(t, err)
 
 	h := &mockHandlers{}
@@ -84,8 +80,7 @@ func TestServe(t *testing.T) {
 }
 
 func TestWithLoggingIntegration(t *testing.T) {
-	logger := zap.NewNop()
-	cfg, _ := config.NewConfig(nil, nil, logger)
+	cfg, _ := config.NewConfig(nil, nil, nil)
 
 	// Простейший хендлер
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

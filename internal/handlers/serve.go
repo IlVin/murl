@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"murl/internal/config"
+	"log/slog"
 	"murl/internal/handlers/middleware"
 	"net/http"
 
@@ -10,14 +10,12 @@ import (
 
 // Объявляем список используемых параметров конфига
 type RouterConfig interface {
-	config.ZapLogger
 	middleware.CompressConfig
 	middleware.LoggingConfig
 	RouterType() string
 }
 
 type IServeConfig interface {
-	config.ZapLogger
 	ListenAddr() string
 }
 
@@ -48,7 +46,7 @@ func NewRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 // Зачем вообще нужно в роутер передавать объект с известными методами?
 // А затем, чтобы в тестах можно было подменить этот объект моком.
 func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
-	cfg.Zap().Info("Used http.ServeMux router")
+	slog.Info("Used http.ServeMux router")
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", s.HndlAPIShorten())
 	mux.HandleFunc("POST /{$}", s.HndlAddURL())
@@ -65,7 +63,7 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 
 // Возвращает настроенный chi.Router
 func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
-	cfg.Zap().Info("Used chi router")
+	slog.Info("Used chi router")
 	r := chi.NewRouter()
 
 	// Middlewares
@@ -84,6 +82,6 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 
 // Запуск сервера. Передаем конфиг и роутер
 func Serve(cfg IServeConfig, router http.Handler) error {
-	cfg.Zap().Info("Server started")
+	slog.Info("Server started")
 	return http.ListenAndServe(cfg.ListenAddr(), router)
 }

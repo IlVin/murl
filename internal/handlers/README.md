@@ -24,5 +24,5 @@ graph TD
     Handler --> Service[Service Layer]
     Service --> Handler
     Handler --> Wrap[Capture Status Code]
-    Wrap --> LogOut[zap.Info: Request Details]
+    Wrap --> LogOut[slog.Info: Request Details]
     LogOut --> Response[HTTP Response]
