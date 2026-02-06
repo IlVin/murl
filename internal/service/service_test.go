@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 // mockRepo реализует интерфейс MicroURLRepo
@@ -30,7 +29,6 @@ func (m *mockRepo) Load(sID byte, idx uint64) (string, error) {
 // mockCfg реализует ServiceConfig
 type mockCfg struct {
 	baseURL string
-	logger  *zap.Logger
 }
 
 func (m mockCfg) ShortBaseURL() config.ShortBaseURL {
@@ -38,16 +36,8 @@ func (m mockCfg) ShortBaseURL() config.ShortBaseURL {
 	return config.ShortBaseURL{URL: *u}
 }
 
-func (m mockCfg) Zap() *zap.Logger {
-	if m.logger == nil {
-		return zap.NewNop()
-	}
-	return m.logger
-}
-
 func TestService_AddURL(t *testing.T) {
-	logger := zap.NewNop()
-	baseCfg := mockCfg{baseURL: "http://localhost:8080", logger: logger}
+	baseCfg := mockCfg{baseURL: "http://localhost:8080"}
 
 	t.Run("success", func(t *testing.T) {
 		repo := new(mockRepo)
@@ -102,8 +92,7 @@ func TestService_AddURL(t *testing.T) {
 }
 
 func TestService_GetURL(t *testing.T) {
-	logger := zap.NewNop()
-	baseCfg := mockCfg{baseURL: "http://localhost:8080", logger: logger}
+	baseCfg := mockCfg{baseURL: "http://localhost:8080"}
 
 	t.Run("success", func(t *testing.T) {
 		repo := new(mockRepo)
