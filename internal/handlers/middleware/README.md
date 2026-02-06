@@ -5,7 +5,7 @@
 ## Основные возможности
 
 ### 1. Логирование (`WithLogging`)
-* **Структурированный лог**: Использует `uber-go/zap` для записи URI, метода, статуса ответа и Content-Type.
+* **Структурированный лог**: Использует `slog` для записи URI, метода, статуса ответа и Content-Type.
 * **Сбор метрик**: Инициализирует структуру `Metrics` в контексте, позволяя другим middleware записывать данные о размерах.
 * **Тайминг**: Точное измерение времени обработки запроса (`duration`).
 
@@ -19,23 +19,13 @@
 
 ---
 
-## Установка
-
-```bash
-go get go.uber.org/zap
-go get ://github.com
-```
-
 ## Пример использования
 
 ### 1. Реализация интерфейса конфигурации
 
 ```go
 type MyConfig struct {
-    logger *zap.Logger
 }
-
-func (c *MyConfig) Zap() *zap.Logger { return c.logger }
 
 func (c *MyConfig) CompressibleContentTypes() map[string]struct{} {
     return map[string]struct{}{
@@ -52,7 +42,7 @@ func (c *MyConfig) CompressibleContentTypes() map[string]struct{} {
 
 ```go
 func main() {
-    cfg := &MyConfig{logger: zap.NewExample()}
+    cfg := &MyConfig{}
     mux := http.NewServeMux()
 
     // Регистрация хендлеров
