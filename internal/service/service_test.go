@@ -1,8 +1,9 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 	"murl/internal/config"
+	"murl/internal/model"
 	"net/url"
 	"testing"
 
@@ -11,7 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockRepo реализует интерфейс MicroURLRepo
+// --- Mocks ---
+
+type mockServiceConfig struct {
+	baseURL config.ShortBaseURL
+}
+
+func (m *mockServiceConfig) ShortBaseURL() config.ShortBaseURL { return m.baseURL }
+
 type mockRepo struct {
 	mock.Mock
 }
@@ -26,100 +34,107 @@ func (m *mockRepo) Load(sID byte, idx uint64) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-// mockCfg реализует ServiceConfig
-type mockCfg struct {
-	baseURL string
-}
-
-func (m mockCfg) ShortBaseURL() config.ShortBaseURL {
-	u, _ := url.Parse(m.baseURL)
-	return config.ShortBaseURL{URL: *u}
-}
+// --- Tests ---
 
 func TestService_AddURL(t *testing.T) {
-	baseCfg := mockCfg{baseURL: "http://localhost:8080"}
+	baseURL, _ := url.Parse("https://m.url")
+	cfg := &mockServiceConfig{baseURL: config.ShortBaseURL{URL: *baseURL}}
 
-	t.Run("success", func(t *testing.T) {
-		repo := new(mockRepo)
-		svc := NewService(baseCfg, repo)
-		longURL := "https://google.com"
-
-		repo.On("Save", longURL).Return(byte(1), uint64(10), nil)
-
-		res, err := svc.AddURL(longURL)
-		require.NoError(t, err)
-		assert.Contains(t, res, "http://localhost:8080")
-		repo.AssertExpectations(t)
+	t.Run("invalid url format", func(t *testing.T) {
+		s := NewService(cfg, new(mockRepo))
+		// Символ \x7f (DEL) или управляющие символы в начале заставляют url.Parse выдать ошибку
+		_, err := s.AddURL("http://example.com/\x7f")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid URL format")
 	})
 
-	t.Run("parse error", func(t *testing.T) {
-		svc := NewService(baseCfg, nil)
-		// Управляющий символ в URL вызовет ошибку url.Parse
-		_, err := svc.AddURL("http://[::1]:index")
-		assert.ErrorIs(t, err, ErrInvalidURL)
-	})
-
-	t.Run("not absolute", func(t *testing.T) {
-		svc := NewService(baseCfg, nil)
-		_, err := svc.AddURL("just/path")
-		assert.ErrorIs(t, err, ErrURLNoAbs)
+	t.Run("not absolute URL", func(t *testing.T) {
+		s := NewService(cfg, new(mockRepo))
+		_, err := s.AddURL("/relative/path")
+		assert.Error(t, err)
+		assert.Equal(t, "URL is not absolute", err.Error())
 	})
 
 	t.Run("unsupported scheme", func(t *testing.T) {
-		svc := NewService(baseCfg, nil)
-		_, err := svc.AddURL("ftp://server.com")
-		assert.ErrorIs(t, err, ErrUnsupportedScheme)
+		s := NewService(cfg, new(mockRepo))
+		_, err := s.AddURL("ftp://files.com")
+		assert.Error(t, err)
+		assert.Equal(t, "unsupported protocol scheme", err.Error())
 	})
 
 	t.Run("repo save error", func(t *testing.T) {
-		repo := new(mockRepo)
-		svc := NewService(baseCfg, repo)
-		repo.On("Save", mock.Anything).Return(byte(0), uint64(0), errors.New("db fail"))
+		mRepo := new(mockRepo)
+		s := NewService(cfg, mRepo)
+		mRepo.On("Save", "http://google.com").Return(byte(0), uint64(0), fmt.Errorf("db error")).Once()
 
-		_, err := svc.AddURL("https://valid.com")
-		assert.ErrorIs(t, err, ErrStoreSaveFailed)
+		_, err := s.AddURL("http://google.com")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to persist data")
 	})
 
-	t.Run("model error (shard overflow)", func(t *testing.T) {
-		repo := new(mockRepo)
-		svc := NewService(baseCfg, repo)
-		// shardID 100 вызывает ErrShardIDLimit в пакете model
-		repo.On("Save", mock.Anything).Return(byte(100), uint64(1), nil)
+	t.Run("model make error", func(t *testing.T) {
+		mRepo := new(mockRepo)
+		s := NewService(cfg, mRepo)
+		// ShardID 64 недопустим для словаря (макс 63), это вызовет ошибку в model.MakeShortURL
+		mRepo.On("Save", "http://google.com").Return(byte(64), uint64(1), nil).Once()
 
-		_, err := svc.AddURL("https://valid.com")
-		assert.ErrorIs(t, err, ErrStoreSaveFailed)
+		_, err := s.AddURL("http://google.com")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to persist data")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mRepo := new(mockRepo)
+		s := NewService(cfg, mRepo)
+		mRepo.On("Save", "https://yandex.ru").Return(byte(1), uint64(10), nil).Once()
+
+		sURL, err := s.AddURL("https://yandex.ru")
+		assert.NoError(t, err)
+		assert.NotEmpty(t, sURL)
 	})
 }
 
 func TestService_GetURL(t *testing.T) {
-	baseCfg := mockCfg{baseURL: "http://localhost:8080"}
+	baseURL, _ := url.Parse("https://m.url")
+	cfg := &mockServiceConfig{baseURL: config.ShortBaseURL{URL: *baseURL}}
 
-	t.Run("success", func(t *testing.T) {
-		repo := new(mockRepo)
-		svc := NewService(baseCfg, repo)
-		expectedURL := "https://yandex.ru"
-
-		// Моделируем валидную ссылку (Shard A=0, Index 0=A) -> "/AA"
-		repo.On("Load", byte(0), uint64(0)).Return(expectedURL, nil)
-
-		res, err := svc.GetURL("http://localhost:8080/AAA")
-		require.NoError(t, err)
-		assert.Equal(t, expectedURL, res)
-	})
-
-	t.Run("model parse error", func(t *testing.T) {
-		svc := NewService(baseCfg, nil)
-		// Слишком короткий путь вызовет ошибку в model
-		_, err := svc.GetURL("http://localhost:8080/A")
-		assert.ErrorIs(t, err, ErrInvalidURL)
+	t.Run("invalid short URL format", func(t *testing.T) {
+		s := NewService(cfg, new(mockRepo))
+		// Передаем строку, которую model.ParseShortURL не сможет распарсить
+		_, err := s.GetURL("http://short.url/\x7f")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid URL format")
 	})
 
 	t.Run("repo load error", func(t *testing.T) {
-		repo := new(mockRepo)
-		svc := NewService(baseCfg, repo)
-		repo.On("Load", mock.Anything, mock.Anything).Return("", errors.New("not found"))
+		mRepo := new(mockRepo)
+		s := NewService(cfg, mRepo)
 
-		_, err := svc.GetURL("http://localhost:8080/AAA")
-		assert.ErrorIs(t, err, ErrStoreGetFailed)
+		// Генерируем ПРАВИЛЬНУЮ ссылку через модель (Shard 0, Index 10)
+		u, _ := url.Parse("https://m.url")
+		sURL, _ := model.MakeShortURL(0, 10, u)
+
+		mRepo.On("Load", byte(0), uint64(10)).Return("", fmt.Errorf("not found")).Once()
+
+		_, err := s.GetURL(sURL)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to retrieve data")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mRepo := new(mockRepo)
+		s := NewService(cfg, mRepo)
+
+		longURL := "https://apple.com"
+		// Шард 1 ('B'), Индекс 1 ('C')
+		u, _ := url.Parse("https://m.url")
+		sURL, _ := model.MakeShortURL(1, 1, u)
+
+		mRepo.On("Load", byte(1), uint64(1)).Return(longURL, nil).Once()
+
+		res, err := s.GetURL(sURL)
+		assert.NoError(t, err)
+		assert.Equal(t, longURL, res)
 	})
 }

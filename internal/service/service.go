@@ -1,19 +1,11 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 	"log/slog"
 	"murl/internal/config"
 	"murl/internal/model"
 	"net/url"
-)
-
-var (
-	ErrInvalidURL        = errors.New("invalid URL format")
-	ErrStoreGetFailed    = errors.New("failed to retrieve data")
-	ErrStoreSaveFailed   = errors.New("failed to persist data")
-	ErrURLNoAbs          = errors.New("URL is not absolute")
-	ErrUnsupportedScheme = errors.New("unsupported protocol scheme")
 )
 
 // Объявляем список используемых параметров конфига
@@ -45,20 +37,20 @@ func (s *Service) AddURL(longURL string) (string, error) {
 			slog.String("long_url", longURL),
 			slog.Any("err", err),
 		)
-		return "", errors.Join(ErrInvalidURL, err)
+		return "", fmt.Errorf("invalid URL format: %w", err)
 	}
 	if !u.IsAbs() {
 		slog.Warn("longURL is not absolute",
 			slog.String("long_url", longURL),
 		)
-		return "", ErrURLNoAbs
+		return "", fmt.Errorf("URL is not absolute")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		slog.Warn("invalid scheme",
 			slog.String("long_url", longURL),
 			slog.String("scheme", u.Scheme),
 		)
-		return "", ErrUnsupportedScheme
+		return "", fmt.Errorf("unsupported protocol scheme")
 	}
 
 	sID, idx, err := s.repo.Save(u.String())
@@ -67,7 +59,7 @@ func (s *Service) AddURL(longURL string) (string, error) {
 			slog.String("long_url", u.String()),
 			slog.Any("err", err),
 		)
-		return "", errors.Join(ErrStoreSaveFailed, err)
+		return "", fmt.Errorf("failed to persist data: %w", err)
 	}
 
 	sURL, err := model.MakeShortURL(sID, idx, &s.shortBaseURL.URL)
@@ -78,7 +70,7 @@ func (s *Service) AddURL(longURL string) (string, error) {
 			slog.String("long_url", longURL),
 			slog.Any("err", err),
 		)
-		return "", errors.Join(ErrStoreSaveFailed, err)
+		return "", fmt.Errorf("failed to persist data: %w", err)
 	}
 
 	slog.Info("URL shortened",
@@ -97,7 +89,7 @@ func (s *Service) GetURL(sURL string) (string, error) {
 			slog.String("sURL", sURL),
 			slog.Any("err", err),
 		)
-		return "", errors.Join(ErrInvalidURL, err)
+		return "", fmt.Errorf("invalid URL format: %w", err)
 	}
 
 	u, err := s.repo.Load(sID, idx)
@@ -107,7 +99,7 @@ func (s *Service) GetURL(sURL string) (string, error) {
 			slog.Uint64("idx", idx),
 			slog.Any("err", err),
 		)
-		return "", errors.Join(ErrStoreGetFailed, err)
+		return "", fmt.Errorf("failed to retrieve data: %w", err)
 	}
 
 	return u, nil
