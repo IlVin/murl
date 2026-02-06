@@ -53,7 +53,7 @@ var ctxMetricsKey = metricsKey{}
 // и возвращает новый http.Handler.
 func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
-		logFn := func(w http.ResponseWriter, r *http.Request) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// функция Now() возвращает текущее время
 			start := time.Now()
 
@@ -81,8 +81,6 @@ func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
 				slog.Duration("duration", time.Since(start)),
 			)
 
-		}
-		// возвращаем функционально расширенный хендлер
-		return http.HandlerFunc(logFn)
+		})
 	}
 }

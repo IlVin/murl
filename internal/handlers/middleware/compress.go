@@ -211,8 +211,9 @@ func (w *readCloserWrapper) Close() error {
 }
 
 func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
+	compressibleContentTypes := cfg.CompressibleContentTypes()
+
 	return func(h http.Handler) http.Handler {
-		compressibleContentTypes := cfg.CompressibleContentTypes()
 
 		// Пулы для чтения (распаковка запроса)
 		rPools := map[string]*sync.Pool{

@@ -106,19 +106,6 @@ func TestSocketAddr(t *testing.T) {
 	})
 }
 
-func TestUtils(t *testing.T) {
-	t.Run("Must success", func(t *testing.T) {
-		val := Must(NewSocketAddr("host:80"))
-		assert.Equal(t, "host:80", val.String())
-	})
-
-	t.Run("Must panic", func(t *testing.T) {
-		assert.Panics(t, func() {
-			Must(NewSocketAddr("bad"))
-		})
-	})
-}
-
 func TestShortBaseURL(t *testing.T) {
 	t.Run("String representation", func(t *testing.T) {
 		sb, _ := NewShortBaseURL("http://localhost")

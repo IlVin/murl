@@ -55,7 +55,7 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 		w.Header().Add("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusCreated)
 		if _, err := w.Write([]byte(murl)); err != nil {
-			slog.Debug("failed to write response",
+			slog.Warn("failed to write response",
 				slog.String("event", "network_error"),
 				slog.Any("err", err),
 			)

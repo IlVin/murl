@@ -216,14 +216,3 @@ func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
 func (s ShortBaseURL) String() string {
 	return s.URL.String()
 }
-
-// =================  UTILS  =================
-
-// Must враппер, поддерживающий цепочки изменения конфига
-// Например: newCfg := oldCfg.SetListenAddr(Must(NewSocketAddr("127.0.0.1:45"))).SetVersion("123")
-func Must[T any](val T, err error) T {
-	if err != nil {
-		panic(fmt.Sprintf("config panic: %v", err))
-	}
-	return val
-}
