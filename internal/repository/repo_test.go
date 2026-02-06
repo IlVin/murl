@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 )
 
 // --- Mocks ---
@@ -19,7 +18,6 @@ type MockRepoConfig struct {
 	mock.Mock
 }
 
-func (m *MockRepoConfig) Zap() *zap.Logger         { return zap.NewNop() }
 func (m *MockRepoConfig) RepoDrv() string          { return m.Called().String(0) }
 func (m *MockRepoConfig) ShardSize() byte          { return m.Called().Get(0).(byte) }
 func (m *MockRepoConfig) EventStoragePath() string { return m.Called().String(0) }
@@ -52,7 +50,6 @@ func TestGetShardID(t *testing.T) {
 func TestRepo_BasicOperations(t *testing.T) {
 	drv := new(MockDrv)
 	repo := &Repo{
-		zap:       zap.NewNop(),
 		shardSize: 64,
 		db:        drv,
 		events:    make(chan event.Event, 10),
@@ -146,7 +143,7 @@ func TestRecovery_Scenarios(t *testing.T) {
 	t.Run("File not found - log error", func(t *testing.T) {
 		cfg := new(MockRepoConfig)
 		cfg.On("EventStoragePath").Return("not_exist.log")
-		repo := &Repo{zap: zap.NewNop()}
+		repo := &Repo{}
 		repo.LoadStoredEvents(cfg) // Логирует ошибку и выходит
 	})
 
@@ -168,7 +165,7 @@ func TestRecovery_Scenarios(t *testing.T) {
 		drv := new(MockDrv)
 		drv.On("Set", byte(1), uint64(10), "http://test.com").Return(nil).Once()
 
-		repo := &Repo{db: drv, zap: zap.NewNop()}
+		repo := &Repo{db: drv}
 		repo.LoadStoredEvents(cfg)
 		drv.AssertExpectations(t)
 	})

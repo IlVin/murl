@@ -4,12 +4,11 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"murl/internal/config"
+	"log/slog"
 	"murl/internal/model/event"
 	"os"
 
 	"github.com/cespare/xxhash/v2"
-	"go.uber.org/zap"
 )
 
 var (
@@ -20,7 +19,6 @@ var (
 
 // Объявляем список используемых параметров конфига
 type RepoConfig interface {
-	config.ZapLogger
 	RepoDrvConfig
 	EventStoragePath() string
 }
@@ -32,7 +30,6 @@ type RepoDataDrv interface {
 }
 
 type Repo struct {
-	zap       *zap.Logger
 	shardSize byte
 	db        RepoDataDrv
 	events    chan event.Event
@@ -44,7 +41,6 @@ func NewRepo(cfg RepoConfig) *Repo {
 	drv := NewRepoDrv(cfg)
 
 	r := &Repo{
-		zap:       cfg.Zap(),
 		shardSize: cfg.ShardSize(),
 		db:        drv,
 		events:    make(chan event.Event, 100),
@@ -112,8 +108,8 @@ func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 	// Чтение событий из файла
 	fh, err := os.OpenFile(cfg.EventStoragePath(), os.O_RDONLY, 0666)
 	if err != nil {
-		cfg.Zap().Error("cannot open file",
-			zap.Error(err),
+		slog.Error("cannot open file",
+			slog.Any("err", err),
 		)
 	}
 	defer fh.Close()
@@ -123,26 +119,26 @@ func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 	for scanner.Scan() {
 		evt, err := event.Parse(scanner.Bytes())
 		if err != nil {
-			cfg.Zap().Error("cannot parse event",
-				zap.Error(err),
+			slog.Error("cannot parse event",
+				slog.Any("err", err),
 			)
 		}
 		p := event.PayloadAddURL{}
 		if err != nil {
-			cfg.Zap().Error("cannot parse event",
-				zap.Error(err),
+			slog.Error("cannot parse event",
+				slog.Any("err", err),
 			)
 		}
 		err = evt.GetPayload(&p)
 		if err != nil {
-			cfg.Zap().Error("cannot parse event",
-				zap.Error(err),
+			slog.Error("cannot parse event",
+				slog.Any("err", err),
 			)
 		}
 		err = r.Set(p.ShardID, p.ID, p.URL)
 		if err != nil {
-			cfg.Zap().Error("cannot set event",
-				zap.Error(err),
+			slog.Error("cannot set event",
+				slog.Any("err", err),
 			)
 		}
 	}
@@ -186,30 +182,30 @@ func eventSaver(cfg RepoConfig, ch <-chan event.Event) {
 	for e := range ch {
 		data, err := e.Serialize()
 		if err != nil {
-			cfg.Zap().Error("cannot serialize event",
-				zap.Error(err),
+			slog.Error("cannot serialize event",
+				slog.Any("err", err),
 			)
 			continue
 		}
 
 		nn, err := w.Write(data)
 		if err != nil || nn != len(data) {
-			cfg.Zap().Error("save event problem",
-				zap.Error(err),
+			slog.Error("save event problem",
+				slog.Any("err", err),
 			)
 			return
 		}
 		err = w.WriteByte(0x0A)
 		if err != nil {
-			cfg.Zap().Error("save event problem",
-				zap.Error(err),
+			slog.Error("save event problem",
+				slog.Any("err", err),
 			)
 			return
 		}
 		err = w.Flush()
 		if err != nil {
-			cfg.Zap().Error("save event problem",
-				zap.Error(err),
+			slog.Error("save event problem",
+				slog.Any("err", err),
 			)
 			return
 		}
