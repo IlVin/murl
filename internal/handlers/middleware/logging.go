@@ -2,15 +2,12 @@ package middleware
 
 import (
 	"context"
-	"murl/internal/config"
+	"log/slog"
 	"net/http"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 type LoggingConfig interface {
-	config.ZapLogger
 }
 
 // Структура-контейнер для сбора данных
@@ -73,15 +70,15 @@ func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
 			// Передаем запрос дальше с новым контекстом
 			h.ServeHTTP(wrapper, r.WithContext(ctx))
 
-			// отправляем сведения о запросе в zap
-			cfg.Zap().Info("http request handled",
-				zap.String("uri", r.RequestURI),
-				zap.String("method", r.Method),
-				zap.Int("status", wrapper.statusCode),
-				zap.String("Content-Type", wrapper.Header().Get("Content-Type")),
-				zap.Int64("OrigSize", metrics.OriginalSize),
-				zap.Int64("RespSize", metrics.ResponseSize),
-				zap.Duration("duration", time.Since(start)),
+			// отправляем сведения о запросе в slog
+			slog.Info("http request handled",
+				slog.String("uri", r.RequestURI),
+				slog.String("method", r.Method),
+				slog.Int("status", wrapper.statusCode),
+				slog.String("Content-Type", wrapper.Header().Get("Content-Type")),
+				slog.Int64("OrigSize", metrics.OriginalSize),
+				slog.Int64("RespSize", metrics.ResponseSize),
+				slog.Duration("duration", time.Since(start)),
 			)
 
 		}

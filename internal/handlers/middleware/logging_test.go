@@ -1,102 +1,90 @@
 package middleware
 
 import (
-	"fmt"
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
-// Мок конфигурации
-type mockLogConfig struct {
-	logger *zap.Logger
-}
-
-func (m *mockLogConfig) Zap() *zap.Logger {
-	return m.logger
-}
+// Mock для конфига
+type mockCfg struct{}
 
 func TestWithLogging(t *testing.T) {
-	// 1. Настраиваем перехват логов zap
-	core, obs := observer.New(zap.InfoLevel)
-	logger := zap.New(core)
-	cfg := &mockLogConfig{logger: logger}
+	// Настраиваем slog на запись в буфер для проверки вывода
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	slog.SetDefault(logger)
 
-	t.Run("successful request with custom status and metrics", func(t *testing.T) {
-		content := "test data"
-		handlerToTest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Проверяем, что метрики доступны в контексте
+	t.Run("Success request with metrics", func(t *testing.T) {
+		buf.Reset()
+
+		// Хендлер, который пишет данные и меняет статус
+		content := "Hello, World!"
+		nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Проверяем наличие метрик в контексте
 			m, ok := r.Context().Value(ctxMetricsKey).(*Metrics)
 			assert.True(t, ok)
-
-			// Эмулируем работу другого middleware (например, сжатия)
-			m.OriginalSize = 100
-			m.IsCompressed = true
+			m.OriginalSize = 500 // Имитируем ручную установку размера
 
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(content))
+			w.Write([]byte(content))
 		})
 
-		h := WithLogging(cfg)(handlerToTest)
+		// Оборачиваем
+		middleware := WithLogging(mockCfg{})
+		handler := middleware(nextHandler)
 
-		r := httptest.NewRequest(http.MethodGet, "/test-uri", nil)
-		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test-url", nil)
+		rec := httptest.NewRecorder()
 
-		h.ServeHTTP(w, r)
+		handler.ServeHTTP(rec, req)
 
-		// Проверки ответа
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, content, w.Body.String())
+		// Проверки HTTP ответа
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		assert.Equal(t, content, rec.Body.String())
 
-		// Проверка логов
-		logs := obs.All()
-		assert.Len(t, logs, 1)
-
-		fields := logs[0].ContextMap()
-		fmt.Printf("%v", fields)
-		assert.Equal(t, "/test-uri", fields["uri"])
-		assert.Equal(t, "GET", fields["method"])
-		assert.Equal(t, int64(http.StatusCreated), fields["status"])
-		assert.Equal(t, "text/plain", fields["Content-Type"])
-		assert.Equal(t, int64(100), fields["OrigSize"])
-		assert.Equal(t, int64(len(content)), fields["RespSize"])
-		assert.NotNil(t, fields["duration"])
+		// Проверки логов
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, "/test-url")
+		assert.Contains(t, logOutput, "GET")
+		assert.Contains(t, logOutput, "201")
+		assert.Contains(t, logOutput, "text/plain")
+		assert.Contains(t, logOutput, `"OrigSize":500`)
+		assert.Contains(t, logOutput, `"RespSize":13`) // len("Hello, World!")
 	})
 
-	t.Run("default status code", func(t *testing.T) {
-		handlerToTest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// WriteHeader не вызывается, должен быть 200 OK
-			_, _ = w.Write([]byte("ok"))
-		})
+	t.Run("Default status code", func(t *testing.T) {
+		buf.Reset()
 
-		h := WithLogging(cfg)(handlerToTest)
-		r := httptest.NewRequest(http.MethodPost, "/default", nil)
-		w := httptest.NewRecorder()
+		// Хендлер, который ничего не вызывает (по умолчанию 200 OK)
+		nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 
-		h.ServeHTTP(w, r)
+		handler := WithLogging(mockCfg{})(nextHandler)
+		req := httptest.NewRequest(http.MethodPost, "/default", nil)
+		rec := httptest.NewRecorder()
 
-		logs := obs.All()
-		// Берем последний лог (второй в этом тесте)
-		lastLog := logs[len(logs)-1]
-		assert.Equal(t, int64(http.StatusOK), lastLog.ContextMap()["status"])
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, buf.String(), `"status":200`)
 	})
-}
 
-func TestWrapResponseWriter_NoMetrics(t *testing.T) {
-	// Тест для покрытия случая, если метрики вдруг nil (защита от паники)
-	w := httptest.NewRecorder()
-	wrapper := &wrapResponseWriter{
-		ResponseWriter: w,
-		metrics:        nil,
-	}
+	t.Run("Write with nil metrics safety", func(t *testing.T) {
+		// Тестируем напрямую структуру враппера на случай nil метрик (защита кода)
+		rec := httptest.NewRecorder()
+		wrapper := &wrapResponseWriter{
+			ResponseWriter: rec,
+			metrics:        nil,
+		}
 
-	n, err := wrapper.Write([]byte("data"))
-	assert.NoError(t, err)
-	assert.Equal(t, 4, n)
-	assert.Nil(t, wrapper.Metrics())
+		n, err := wrapper.Write([]byte("test"))
+		assert.NoError(t, err)
+		assert.Equal(t, 4, n)
+		assert.Equal(t, "test", rec.Body.String())
+	})
 }
