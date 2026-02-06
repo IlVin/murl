@@ -1,14 +1,9 @@
 package repository
 
 import (
-	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
-)
-
-var (
-	ErrOutOfRange       = errors.New("shardID out of range")
-	ErrDBRecordNotFound = errors.New("record not found")
 )
 
 type RepoDrvConfig interface {
@@ -77,7 +72,7 @@ func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
 			slog.Uint64("received", uint64(shardID)),
 			slog.Int("limit", len(s.shards)),
 		)
-		return 0, ErrOutOfRange
+		return 0, fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
 	shard := &s.shards[shardID]
@@ -108,7 +103,7 @@ func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
 			slog.Uint64("received", uint64(shardID)),
 			slog.Int("limit", len(s.shards)),
 		)
-		return ErrOutOfRange
+		return fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
 	shard := &s.shards[shardID]
@@ -117,7 +112,7 @@ func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
 	if idx == uint64(len(shard.data)) {
 		shard.data = append(shard.data, u)
 	} else if idx > uint64(len(shard.data)) {
-		newTail := make([]string, idx-uint64(len(shard.data)+1))
+		newTail := make([]string, idx-uint64(len(shard.data))+1)
 		shard.data = append(shard.data, newTail...)
 		shard.data[idx] = u
 	} else {
@@ -132,14 +127,14 @@ func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
 // По строке-идентификатору возвращает ранее записанную строку
 func (s *InMemoryRepoDrv) Select(shardID byte, idx uint64) (string, error) {
 	if int(shardID) >= len(s.shards) {
-		return "", ErrOutOfRange
+		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
 	shard := &s.shards[shardID]
 	shard.mu.RLock()
 
 	if idx >= uint64(len(shard.data)) {
-		return "", ErrDBRecordNotFound
+		return "", fmt.Errorf("record not found: %d", idx)
 	}
 
 	val := shard.data[idx]
