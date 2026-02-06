@@ -8,9 +8,6 @@ import (
 	"os"
 )
 
-// +--------------------------+
-// |  Config - иммутабельный  |
-// +--------------------------+
 type Config struct {
 	version                  string
 	listenAddr               SocketAddr
@@ -20,6 +17,7 @@ type Config struct {
 	shardSize                byte
 	compressibleContentTypes map[string]struct{}
 	eventStoragePath         string
+	dbConfigPath             string
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -46,6 +44,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			"application/javascript": {},
 		},
 		eventStoragePath: "",
+		dbConfigPath:     "",
 	}
 
 	// Command line arguments
@@ -111,6 +110,14 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c Config) DBConfigPath() string {
+	return c.dbConfigPath
+}
+func (c Config) SetDBConfigPath(dbConfigPath string) Config {
+	c.dbConfigPath = dbConfigPath
+	return c
 }
 
 func (c Config) EventStoragePath() string {
@@ -196,23 +203,4 @@ func NewSocketAddr(host string) (SocketAddr, error) {
 
 func (s SocketAddr) String() string {
 	return net.JoinHostPort(s.hostname, s.port)
-}
-
-// +------------------------------+
-// | ShortBaseURL - иммутабельный |
-// +------------------------------+
-type ShortBaseURL struct {
-	url.URL
-}
-
-func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
-	sbURL, err := url.Parse(baseURL)
-	if err != nil {
-		return ShortBaseURL{}, fmt.Errorf("invalid ShortBaseURL: %w", err)
-	}
-	return ShortBaseURL{*sbURL}, nil
-}
-
-func (s ShortBaseURL) String() string {
-	return s.URL.String()
 }
