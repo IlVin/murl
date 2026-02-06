@@ -3,21 +3,12 @@ package model
 import (
 	"encoding/base64"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
 const b64uDict = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-
-var (
-	ErrShardIDLimit  = errors.New("shard id exceeds maximum limit of " + strconv.Itoa(len(b64uDict)-1))
-	ErrInvalidFormat = errors.New("invalid short url format")
-	ErrDecodeBase64  = errors.New("failed to decode base64 data")
-	ErrDecodeIndex   = errors.New("failed to decode record index")
-	ErrInvalidShard  = errors.New("invalid shard identifier")
-)
 
 func b64u() *base64.Encoding {
 	return base64.URLEncoding.WithPadding(base64.NoPadding)
@@ -27,25 +18,25 @@ func ParseShortURL(sURL string) (shardID byte, idx uint64, err error) {
 	u, err := url.Parse(sURL)
 	// Путь должен быть минимум 3 символа: "/" + "шард" + "минимум 1 байт данных"
 	if err != nil || len(u.Path) < 3 {
-		return 0, 0, ErrInvalidFormat
+		return 0, 0, fmt.Errorf("invalid short url format: %s", sURL)
 	}
 
 	// Извлекаем шард из первого символа после слэша
 	pos := strings.Index(b64uDict, string(u.Path[1]))
 	if pos < 0 {
-		return 0, 0, ErrInvalidShard
+		return 0, 0, fmt.Errorf("invalid shard identifier: '%s'", string(u.Path[1]))
 	}
 	shardID = byte(pos)
 
 	// Декодируем индекс из остатка пути
 	data, err := b64u().DecodeString(u.Path[2:])
 	if err != nil {
-		return 0, 0, errors.Join(ErrDecodeBase64, err)
+		return 0, 0, fmt.Errorf("failed to decode base64 data: %w", err)
 	}
 
 	idx, n := binary.Uvarint(data)
 	if n <= 0 || n != len(data) {
-		return 0, 0, ErrDecodeIndex
+		return 0, 0, fmt.Errorf("failed to decode record index: %v", idx)
 	}
 
 	return shardID, idx, nil
@@ -53,7 +44,7 @@ func ParseShortURL(sURL string) (shardID byte, idx uint64, err error) {
 
 func MakeShortURL(shardID byte, idx uint64, baseURL *url.URL) (string, error) {
 	if int(shardID) >= len(b64uDict) {
-		return "", ErrShardIDLimit
+		return "", fmt.Errorf("invalid ShardID: index [%d] out of bounds [%d]", shardID, len(b64uDict)-1)
 	}
 
 	// Кодируем индекс в компактный Varint
