@@ -63,7 +63,7 @@ func (r *Repo) Save(longStr string) (byte, uint64, error) {
 	sID := GetShardID(longStr, r.shardSize)
 	idx, err := r.db.UpSert(sID, longStr)
 	if err != nil {
-		return 0, 0, fmt.Errorf("Failed to save URL mapping to the database: %w", err)
+		return 0, 0, fmt.Errorf("failed to save URL mapping to the database: %w", err)
 	}
 
 	err = r.SendAddURLEvent(sID, idx, longStr)
