@@ -11,7 +11,6 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 // Мок конфига
@@ -19,7 +18,6 @@ type mockConfig struct {
 	types map[string]struct{}
 }
 
-func (m *mockConfig) Zap() *zap.Logger                              { return zap.NewNop() }
 func (m *mockConfig) CompressibleContentTypes() map[string]struct{} { return m.types }
 
 func TestWithCompress(t *testing.T) {
@@ -163,7 +161,7 @@ func TestWriteHeader_DoubleCall(t *testing.T) {
 	// Тест покрытия headerWritten
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
-	cw := NewCompressResponseWriter(zap.NewNop(), w, r, nil, nil)
+	cw := NewCompressResponseWriter(w, r, nil, nil)
 
 	cw.WriteHeader(http.StatusOK)
 	cw.WriteHeader(http.StatusNotFound) // Второй вызов

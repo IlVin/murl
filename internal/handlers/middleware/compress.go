@@ -5,7 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"io"
-	"murl/internal/config"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -13,11 +13,9 @@ import (
 	"sync"
 
 	"github.com/andybalholm/brotli"
-	"go.uber.org/zap"
 )
 
 type CompressConfig interface {
-	config.ZapLogger
 	CompressibleContentTypes() map[string]struct{}
 }
 
@@ -100,13 +98,11 @@ type CompressResponseWriter struct {
 	compressibleContentTypes map[string]struct{}
 	headerWritten            bool
 	codec                    Codec
-	zap                      *zap.Logger
 	pools                    map[string]*sync.Pool
 }
 
-func NewCompressResponseWriter(zap *zap.Logger, w http.ResponseWriter, r *http.Request, compressibleContentTypes map[string]struct{}, pools map[string]*sync.Pool) *CompressResponseWriter {
+func NewCompressResponseWriter(w http.ResponseWriter, r *http.Request, compressibleContentTypes map[string]struct{}, pools map[string]*sync.Pool) *CompressResponseWriter {
 	return &CompressResponseWriter{
-		zap:                      zap,
 		w:                        w,
 		r:                        r,
 		compressibleContentTypes: compressibleContentTypes,
@@ -242,7 +238,10 @@ func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 				case "gzip":
 					zr := rPools["gzip"].Get().(*gzip.Reader)
 					if err := zr.Reset(oldBody); err != nil {
-						cfg.Zap().Error("gzip reset error", zap.Error(err))
+						slog.Error(
+							"gzip reset error",
+							slog.Any("err", err),
+						)
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
@@ -250,7 +249,10 @@ func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 						Reader: zr,
 						closer: func() error {
 							if err := zr.Close(); err != nil {
-								cfg.Zap().Error("gzip close error", zap.Error(err))
+								slog.Error(
+									"gzip close error",
+									slog.Any("err", err),
+								)
 							}
 							rPools["gzip"].Put(zr)
 							return oldBody.Close()
@@ -259,7 +261,10 @@ func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 				case "deflate":
 					fr := rPools["deflate"].Get().(flate.Resetter)
 					if err := fr.Reset(oldBody, nil); err != nil {
-						cfg.Zap().Error("deflate reset error", zap.Error(err))
+						slog.Error(
+							"deflate reset error",
+							slog.Any("err", err),
+						)
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
@@ -284,7 +289,7 @@ func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 				}
 			}
 
-			cw := NewCompressResponseWriter(cfg.Zap(), w, r, compressibleContentTypes, wPools)
+			cw := NewCompressResponseWriter(w, r, compressibleContentTypes, wPools)
 			defer cw.Close()
 			h.ServeHTTP(cw, r)
 		})
