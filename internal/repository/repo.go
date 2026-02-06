@@ -2,19 +2,12 @@ package repository
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"log/slog"
 	"murl/internal/model/event"
 	"os"
 
 	"github.com/cespare/xxhash/v2"
-)
-
-var (
-	ErrURLNotFound        error = errors.New("URL not found")
-	ErrURLMappingNotSaved error = errors.New("the mapping between short URL and long URL is not saved")
-	ErrAddURLEventNotSent error = errors.New("cannot send event AddURL")
 )
 
 // Объявляем список используемых параметров конфига
@@ -70,12 +63,12 @@ func (r *Repo) Save(longStr string) (byte, uint64, error) {
 	sID := GetShardID(longStr, r.shardSize)
 	idx, err := r.db.UpSert(sID, longStr)
 	if err != nil {
-		return 0, 0, errors.Join(ErrURLMappingNotSaved, err)
+		return 0, 0, fmt.Errorf("Failed to save URL mapping to the database: %w", err)
 	}
 
 	err = r.SendAddURLEvent(sID, idx, longStr)
 	if err != nil {
-		return 0, 0, errors.Join(ErrURLMappingNotSaved, err)
+		return 0, 0, fmt.Errorf("URL mapping event was not sent: %w", err)
 	}
 
 	return sID, idx, nil
@@ -89,7 +82,7 @@ func (r *Repo) Set(sID byte, id uint64, u string) error {
 func (r *Repo) Load(sID byte, idx uint64) (string, error) {
 	lURL, err := r.db.Select(sID, idx)
 	if err != nil {
-		return "", errors.Join(ErrURLNotFound, err)
+		return "", fmt.Errorf("URL not found: %w", err)
 	}
 
 	return lURL, nil
@@ -102,6 +95,14 @@ func (r *Repo) Close() {
 func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 	// Если файл не задан, то выходим
 	if cfg.EventStoragePath() == "" {
+		return
+	}
+
+	// Проверяем, существует ли файл вообще
+	if _, err := os.Stat(cfg.EventStoragePath()); os.IsNotExist(err) {
+		slog.Error("event storage not found",
+			slog.String("path", cfg.EventStoragePath()),
+		)
 		return
 	}
 
@@ -122,23 +123,29 @@ func (r *Repo) LoadStoredEvents(cfg RepoConfig) {
 			slog.Error("cannot parse event",
 				slog.Any("err", err),
 			)
+			continue
 		}
 		p := event.PayloadAddURL{}
-		if err != nil {
-			slog.Error("cannot parse event",
-				slog.Any("err", err),
+
+		if evt.GetType() != event.EvAddURL {
+			slog.Error("invalid event type",
+				slog.Any("EventType", evt.GetType()),
 			)
+			continue
 		}
+
 		err = evt.GetPayload(&p)
 		if err != nil {
-			slog.Error("cannot parse event",
+			slog.Error("cannot get event payload",
 				slog.Any("err", err),
 			)
 		}
+
 		err = r.Set(p.ShardID, p.ID, p.URL)
 		if err != nil {
-			slog.Error("cannot set event",
+			slog.Error("failed to save event payload to DB",
 				slog.Any("err", err),
+				slog.Any("payload", p),
 			)
 		}
 	}
@@ -153,7 +160,7 @@ func (r *Repo) SendAddURLEvent(sID byte, idx uint64, u string) error {
 
 	event, err := event.MakeEvent(payload)
 	if err != nil {
-		return errors.Join(ErrAddURLEventNotSent, err)
+		return fmt.Errorf("event construction failed: %w", err)
 	}
 
 	// Отправка события на запись

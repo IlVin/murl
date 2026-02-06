@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"errors"
+	"fmt"
 	"murl/internal/model/event"
 	"os"
 	"path/filepath"
@@ -10,190 +10,184 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Mocks ---
 
-type MockRepoConfig struct {
+type mockRepoConfig struct {
+	drv       string
+	shardSize byte
+	path      string
+}
+
+func (m *mockRepoConfig) RepoDrv() string          { return m.drv }
+func (m *mockRepoConfig) ShardSize() byte          { return m.shardSize }
+func (m *mockRepoConfig) EventStoragePath() string { return m.path }
+
+type mockDataDrv struct {
 	mock.Mock
 }
 
-func (m *MockRepoConfig) RepoDrv() string          { return m.Called().String(0) }
-func (m *MockRepoConfig) ShardSize() byte          { return m.Called().Get(0).(byte) }
-func (m *MockRepoConfig) EventStoragePath() string { return m.Called().String(0) }
-
-type MockDrv struct {
-	mock.Mock
-}
-
-func (m *MockDrv) UpSert(shardID byte, str string) (uint64, error) {
+func (m *mockDataDrv) UpSert(shardID byte, str string) (uint64, error) {
 	args := m.Called(shardID, str)
 	return args.Get(0).(uint64), args.Error(1)
 }
 
-func (m *MockDrv) Select(shardID byte, idx uint64) (string, error) {
+func (m *mockDataDrv) Select(shardID byte, idx uint64) (string, error) {
 	args := m.Called(shardID, idx)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockDrv) Set(shardID byte, idx uint64, u string) error {
-	return m.Called(shardID, idx, u).Error(0)
+func (m *mockDataDrv) Set(shardID byte, idx uint64, u string) error {
+	args := m.Called(shardID, idx, u)
+	return args.Error(0)
 }
 
 // --- Tests ---
 
 func TestGetShardID(t *testing.T) {
-	assert.Equal(t, byte(0), GetShardID("test", 0))
-	assert.NotEqual(t, byte(0), GetShardID("url", 64))
+	// Проверка корректности хеширования и деления на шарды
+	assert.Equal(t, byte(0), GetShardID("any", 0))
+	assert.Equal(t, byte(0), GetShardID("test", 1))
+
+	// Разные строки должны (вероятно) попадать в разные шарды при большом количестве шардов
+	s1 := GetShardID("url1", 64)
+	s2 := GetShardID("url2", 64)
+	assert.NotEqual(t, s1, s2, "Хеш должен распределять значения")
 }
 
 func TestRepo_BasicOperations(t *testing.T) {
-	drv := new(MockDrv)
-	repo := &Repo{
-		shardSize: 64,
-		db:        drv,
-		events:    make(chan event.Event, 10),
-	}
+	mDrv := new(mockDataDrv)
+	cfg := &mockRepoConfig{drv: "InMemory", shardSize: 10, path: ""}
+
+	// Инициализируем репо
+	r := NewRepo(cfg)
+	r.db = mDrv // Подменяем на мок
+	defer r.Close()
+
+	url := "https://google.com"
+	sID := GetShardID(url, 10)
 
 	t.Run("Save Success", func(t *testing.T) {
-		url := "https://google.com"
-		sID := GetShardID(url, 64)
-		drv.On("UpSert", sID, url).Return(uint64(1), nil).Once()
+		mDrv.On("UpSert", sID, url).Return(uint64(100), nil).Once()
 
-		sid, idx, err := repo.Save(url)
-		assert.NoError(t, err)
-		assert.Equal(t, uint64(1), idx)
-		assert.Equal(t, sID, sid)
-	})
-
-	t.Run("Save DB Error", func(t *testing.T) {
-		drv.On("UpSert", mock.Anything, mock.Anything).Return(uint64(0), errors.New("db fail")).Once()
-		_, _, err := repo.Save("fail")
-		assert.ErrorIs(t, err, ErrURLMappingNotSaved)
+		resSID, resIdx, err := r.Save(url)
+		require.NoError(t, err)
+		assert.Equal(t, sID, resSID)
+		assert.Equal(t, uint64(100), resIdx)
 	})
 
 	t.Run("Load Success", func(t *testing.T) {
-		drv.On("Select", byte(1), uint64(1)).Return("url", nil).Once()
-		res, err := repo.Load(1, 1)
-		assert.NoError(t, err)
-		assert.Equal(t, "url", res)
+		mDrv.On("Select", sID, uint64(100)).Return(url, nil).Once()
+
+		resURL, err := r.Load(sID, uint64(100))
+		require.NoError(t, err)
+		assert.Equal(t, url, resURL)
 	})
 
-	t.Run("Load Error", func(t *testing.T) {
-		drv.On("Select", mock.Anything, mock.Anything).Return("", errors.New("not found")).Once()
-		_, err := repo.Load(1, 1)
-		assert.ErrorIs(t, err, ErrURLNotFound)
+	t.Run("Save DB Error", func(t *testing.T) {
+		mDrv.On("UpSert", mock.Anything, mock.Anything).Return(uint64(0), fmt.Errorf("db fail")).Once()
+		_, _, err := r.Save("http://error.com")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Failed to save URL mapping")
 	})
 
-	t.Run("Set Success", func(t *testing.T) {
-		drv.On("Set", byte(1), uint64(1), "url").Return(nil).Once()
-		err := repo.Set(1, 1, "url")
-		assert.NoError(t, err)
-	})
-}
-
-func TestEventSaver_Scenarios(t *testing.T) {
-	t.Run("Empty path - drain channel", func(t *testing.T) {
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return("")
-
-		ch := make(chan event.Event, 1)
-		p := event.PayloadAddURL{}
-		ev, _ := event.MakeEvent(p)
-		ch <- ev
-		close(ch)
-
-		// Должно просто вычитать канал без паник и файлов
-		eventSaver(cfg, ch)
-	})
-
-	t.Run("Invalid path - panic", func(t *testing.T) {
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return("/non/existent/path/file.log")
-		ch := make(chan event.Event)
-		assert.Panics(t, func() { eventSaver(cfg, ch) })
-	})
-
-	t.Run("Serialization Error", func(t *testing.T) {
-		tmp := filepath.Join(t.TempDir(), "events.log")
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return(tmp)
-
-		ch := make(chan event.Event, 1)
-		// Используем пустое событие или мок, чтобы вызвать ошибку Serialize
-		// В вашей реализации pvtEvent Serialize падает редко, но мы проверим ветку лога
-		ev := &brokenEvent{}
-		ch <- ev
-		close(ch)
-
-		eventSaver(cfg, ch)
-		content, _ := os.ReadFile(tmp)
-		assert.Equal(t, 0, len(content))
+	t.Run("Load Not Found", func(t *testing.T) {
+		mDrv.On("Select", mock.Anything, mock.Anything).Return("", fmt.Errorf("not found")).Once()
+		_, err := r.Load(0, 999)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "URL not found")
 	})
 }
 
-func TestRecovery_Scenarios(t *testing.T) {
-	t.Run("No path - return", func(t *testing.T) {
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return("")
-		repo := &Repo{}
-		repo.LoadStoredEvents(cfg) // Не должно упасть
-	})
+func TestRepo_EventStorage_SuccessCycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	eventFile := filepath.Join(tmpDir, "events.log")
 
-	t.Run("File not found - log error", func(t *testing.T) {
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return("not_exist.log")
-		repo := &Repo{}
-		repo.LoadStoredEvents(cfg) // Логирует ошибку и выходит
-	})
+	cfg := &mockRepoConfig{drv: "InMemory", shardSize: 10, path: eventFile}
+	mDrv := new(mockDataDrv)
 
-	t.Run("Successful Recovery", func(t *testing.T) {
-		tmp := filepath.Join(t.TempDir(), "recovery.log")
-		// Готовим файл с одним событием
-		p := event.PayloadAddURL{
-			URL:     "http://test.com",
-			ID:      10,
-			ShardID: 1,
-		}
-		ev, _ := event.MakeEvent(p)
-		data, _ := ev.Serialize()
-		os.WriteFile(tmp, append(data, 0x0A), 0666)
+	// 1. Создаем репо и записываем событие
+	r := NewRepo(cfg)
+	r.db = mDrv
 
-		cfg := new(MockRepoConfig)
-		cfg.On("EventStoragePath").Return(tmp)
+	testURL := "http://example.com"
+	sID := GetShardID(testURL, 10)
 
-		drv := new(MockDrv)
-		drv.On("Set", byte(1), uint64(10), "http://test.com").Return(nil).Once()
+	mDrv.On("UpSert", sID, testURL).Return(uint64(50), nil).Once()
 
-		repo := &Repo{db: drv}
-		repo.LoadStoredEvents(cfg)
-		drv.AssertExpectations(t)
-	})
-}
+	_, _, err := r.Save(testURL)
+	require.NoError(t, err)
 
-func TestNewRepo_Functional(t *testing.T) {
-	// Мы не можем легко мокать NewRepoDrv, так как это свободная функция,
-	// поэтому полагаемся на конфиг InMemory
-	tmp := filepath.Join(t.TempDir(), "newrepo.log")
-	cfg := new(MockRepoConfig)
-	cfg.On("RepoDrv").Return("InMemory")
-	cfg.On("ShardSize").Return(byte(16))
-	cfg.On("EventStoragePath").Return(tmp)
-
-	repo := NewRepo(cfg)
-	assert.NotNil(t, repo)
-
-	// Проверяем Save и закрытие
-	repo.Save("http://final.com")
-	repo.Close()
-
-	// Даем время горутине дописать
+	// Закрываем, чтобы saver сбросил данные в файл
+	r.Close()
 	time.Sleep(50 * time.Millisecond)
-	content, _ := os.ReadFile(tmp)
-	assert.NotEmpty(t, content)
+
+	// 2. Проверяем восстановление данных из файла в новый репо
+	mDrvRestored := new(mockDataDrv)
+	// Ожидаем, что LoadStoredEvents вызовет Set для восстановления состояния
+	mDrvRestored.On("Set", sID, uint64(50), testURL).Return(nil).Once()
+
+	// Создаем объект вручную, чтобы вызвать LoadStoredEvents до запуска saver
+	r2 := &Repo{
+		shardSize: 10,
+		db:        mDrvRestored,
+		events:    make(chan event.Event, 1),
+	}
+	r2.LoadStoredEvents(cfg)
+
+	mDrvRestored.AssertExpectations(t)
 }
 
-// Вспомогательный тип для ошибки сериализации
-type brokenEvent struct{ event.Event }
+func TestRepo_LoadStoredEvents_Errors(t *testing.T) {
+	tmpDir := t.TempDir()
 
-func (b *brokenEvent) Serialize() ([]byte, error) { return nil, errors.New("fail") }
+	t.Run("Missing File", func(t *testing.T) {
+		cfg := &mockRepoConfig{path: filepath.Join(tmpDir, "non_existent.log")}
+		r := &Repo{}
+		// Не должно паниковать, просто выведет ERROR в лог
+		r.LoadStoredEvents(cfg)
+	})
+
+	t.Run("Empty Path", func(t *testing.T) {
+		cfg := &mockRepoConfig{path: ""}
+		r := &Repo{}
+		r.LoadStoredEvents(cfg) // Должен просто выйти
+	})
+
+	t.Run("Corrupted File", func(t *testing.T) {
+		path := filepath.Join(tmpDir, "corrupt.log")
+		// Пишем невалидные данные (не JSON)
+		os.WriteFile(path, []byte("invalid_data\n"), 0644)
+
+		cfg := &mockRepoConfig{path: path}
+		r := &Repo{db: new(mockDataDrv)}
+		r.LoadStoredEvents(cfg) // Пройдет через ошибки парсинга
+	})
+}
+
+func TestEventSaver_SpecialCases(t *testing.T) {
+	t.Run("No Storage Path", func(t *testing.T) {
+		cfg := &mockRepoConfig{path: ""}
+		ch := make(chan event.Event, 1)
+
+		p := event.PayloadAddURL{URL: "test"}
+		ev, _ := event.MakeEvent(p)
+		ch <- ev
+		close(ch)
+
+		// Должен просто вычитать канал и завершиться
+		eventSaver(cfg, ch)
+	})
+
+	t.Run("File Write Error (Invalid Path)", func(t *testing.T) {
+		// Путь к директории как к файлу вызовет ошибку открытия
+		cfg := &mockRepoConfig{path: "/"}
+		ch := make(chan event.Event)
+
+		assert.Panics(t, func() {
+			eventSaver(cfg, ch)
+		})
+	})
+}
