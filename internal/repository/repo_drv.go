@@ -2,10 +2,8 @@ package repository
 
 import (
 	"errors"
-	"murl/internal/config"
+	"log/slog"
 	"sync"
-
-	"go.uber.org/zap"
 )
 
 var (
@@ -14,7 +12,6 @@ var (
 )
 
 type RepoDrvConfig interface {
-	config.ZapLogger
 	RepoDrv() string
 	ShardSize() byte
 }
@@ -32,8 +29,8 @@ func NewRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	case "PgDB":
 		return newPgRepoDrv(cfg)
 	}
-	cfg.Zap().Error("Unknow repo driver",
-		zap.String("RepoDrv", cfg.RepoDrv()),
+	slog.Error("Unknow repo driver",
+		slog.String("RepoDrv", cfg.RepoDrv()),
 	)
 	panic("Unknow repo driver")
 }
@@ -51,7 +48,6 @@ type inMemoryShard struct {
 }
 
 type InMemoryRepoDrv struct {
-	zap    *zap.Logger
 	shards []inMemoryShard
 }
 
@@ -59,7 +55,6 @@ func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	shardSize := int(cfg.ShardSize())
 
 	s := &InMemoryRepoDrv{
-		zap:    cfg.Zap(),
 		shards: make([]inMemoryShard, shardSize),
 	}
 
@@ -71,16 +66,16 @@ func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 		}
 	}
 
-	s.zap.Info("Use InMemoryDrv")
+	slog.Info("Use InMemoryDrv")
 	return s
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
 func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
 	if int(shardID) >= len(s.shards) {
-		s.zap.Error("shard access out of bounds",
-			zap.Uint8("received", shardID),
-			zap.Int("limit", len(s.shards)),
+		slog.Error("shard access out of bounds",
+			slog.Uint64("received", uint64(shardID)),
+			slog.Int("limit", len(s.shards)),
 		)
 		return 0, ErrOutOfRange
 	}
@@ -109,9 +104,9 @@ func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
 
 func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
 	if int(shardID) >= len(s.shards) {
-		s.zap.Error("shard access out of bounds",
-			zap.Uint8("received", shardID),
-			zap.Int("limit", len(s.shards)),
+		slog.Error("shard access out of bounds",
+			slog.Uint64("received", uint64(shardID)),
+			slog.Int("limit", len(s.shards)),
 		)
 		return ErrOutOfRange
 	}
@@ -160,6 +155,6 @@ func (s *InMemoryRepoDrv) Select(shardID byte, idx uint64) (string, error) {
 // =============================================
 // Заглушка. Драйвер будет разработан позже
 func newPgRepoDrv(cfg RepoDrvConfig) RepoDrv {
-	cfg.Zap().Info("Use PgDrv")
+	slog.Info("Use PgDrv")
 	return newInMemoryRepoDrv(cfg)
 }

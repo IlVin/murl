@@ -5,42 +5,33 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 // mockDrvConfig реализует интерфейс RepoDrvConfig
 type mockDrvConfig struct {
 	drv       string
 	shardSize byte
-	logger    *zap.Logger
 }
 
 func (m mockDrvConfig) RepoDrv() string { return m.drv }
 func (m mockDrvConfig) ShardSize() byte { return m.shardSize }
-func (m mockDrvConfig) Zap() *zap.Logger {
-	if m.logger == nil {
-		return zap.NewNop()
-	}
-	return m.logger
-}
 
 func TestNewRepoDrv(t *testing.T) {
-	logger := zap.NewNop()
 
 	t.Run("InMemory driver", func(t *testing.T) {
-		cfg := mockDrvConfig{drv: "InMemory", shardSize: 10, logger: logger}
+		cfg := mockDrvConfig{drv: "InMemory", shardSize: 10}
 		drv := NewRepoDrv(cfg)
 		assert.IsType(t, &InMemoryRepoDrv{}, drv)
 	})
 
 	t.Run("PgDB driver stub", func(t *testing.T) {
-		cfg := mockDrvConfig{drv: "PgDB", shardSize: 10, logger: logger}
+		cfg := mockDrvConfig{drv: "PgDB", shardSize: 10}
 		drv := NewRepoDrv(cfg)
 		assert.IsType(t, &InMemoryRepoDrv{}, drv)
 	})
 
 	t.Run("Unknown driver panics", func(t *testing.T) {
-		cfg := mockDrvConfig{drv: "Unknown", shardSize: 10, logger: logger}
+		cfg := mockDrvConfig{drv: "Unknown", shardSize: 10}
 
 		// Проверяем, что функция вызывает панику
 		assert.PanicsWithValue(t, "Unknow repo driver", func() {
@@ -50,8 +41,7 @@ func TestNewRepoDrv(t *testing.T) {
 }
 
 func TestInMemoryRepoDrv_UpSert(t *testing.T) {
-	logger := zap.NewNop()
-	cfg := mockDrvConfig{drv: "InMemory", shardSize: 2, logger: logger}
+	cfg := mockDrvConfig{drv: "InMemory", shardSize: 2}
 	drv := NewRepoDrv(cfg)
 
 	t.Run("Successful first insert", func(t *testing.T) {
@@ -91,8 +81,7 @@ func TestInMemoryRepoDrv_UpSert(t *testing.T) {
 }
 
 func TestInMemoryRepoDrv_Select(t *testing.T) {
-	logger := zap.NewNop()
-	cfg := mockDrvConfig{drv: "InMemory", shardSize: 1, logger: logger}
+	cfg := mockDrvConfig{drv: "InMemory", shardSize: 1}
 	drv := NewRepoDrv(cfg)
 
 	testStr := "select-me"
