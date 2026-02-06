@@ -9,7 +9,6 @@
     1.  Значения по умолчанию (Hardcoded defaults).
     2.  Флаги командной строки (Command line flags).
     3.  Переменные окружения (Environment variables).
-*   **Инъекция логгера (DI):** Логгер `zap` внедряется в конфиг при создании. Реализован интерфейс `ZapLogger`, который позволяет компонентам системы (Repository, Service) прозрачно извлекать логгер для своих нужд.
 *   **Строгая типизация:**
     *   `SocketAddr`: Гарантирует корректность сетевого адреса `host:port` еще на этапе инициализации.
     *   `ShortBaseURL`: Обеспечивает валидность базового URL, автоматически очищая его от чувствительных данных (User Info).
@@ -21,7 +20,7 @@
 
 ```go
 // Инициализация основного конфига
-cfg, err := config.NewConfig(&os.Args, os.LookupEnv, logger)
+cfg, err := config.NewConfig(&os.Args, os.LookupEnv)
 
 // Создание модифицированной копии для тестов
 testCfg := cfg.SetRepoDrv("InMemory").

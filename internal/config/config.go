@@ -6,23 +6,12 @@ import (
 	"net"
 	"net/url"
 	"os"
-
-	"go.uber.org/zap"
 )
-
-// +------------------+
-// |    ZapLogger    |
-// +------------------+
-// Интерфейс для быстрого эмбеддинга
-type ZapLogger interface {
-	Zap() *zap.Logger
-}
 
 // +--------------------------+
 // |  Config - иммутабельный  |
 // +--------------------------+
 type Config struct {
-	zap                      *zap.Logger
 	version                  string
 	listenAddr               SocketAddr
 	shortBaseURL             ShortBaseURL
@@ -36,7 +25,7 @@ type Config struct {
 type LookupEnvFunc func(key string) (string, bool)
 
 // NewConfig фабрика конфига, которая должна вызываться один раз
-func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger) (Config, error) {
+func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	// Подмена функции чтения переменных окружения
 	if lookupEnv == nil {
 		lookupEnv = os.LookupEnv
@@ -44,7 +33,6 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc, zapLogger *zap.Logger
 
 	// Default config
 	cfg := Config{
-		zap:          zapLogger,
 		version:      "0.0.1",
 		listenAddr:   SocketAddr{hostname: "localhost", port: "8080"},
 		shortBaseURL: ShortBaseURL{url.URL{Scheme: "http", Host: "localhost:8080", Path: "/"}},
@@ -187,14 +175,6 @@ func (c Config) ShardSize() byte {
 }
 func (c Config) SetShardSize(shardSize byte) Config {
 	c.shardSize = shardSize
-	return c
-}
-
-func (c Config) Zap() *zap.Logger {
-	return c.zap
-}
-func (c Config) SetZap(zapLogger *zap.Logger) Config {
-	c.zap = zapLogger
 	return c
 }
 

@@ -38,7 +38,7 @@ func (m mockServeCfg) ListenAddr() string { return m.addr }
 
 func TestNewRouter(t *testing.T) {
 	// Используем NewConfig для создания базового конфига
-	baseCfg, err := config.NewConfig(nil, nil, nil)
+	baseCfg, err := config.NewConfig(nil, nil)
 	require.NoError(t, err)
 
 	h := &mockHandlers{}
@@ -80,7 +80,7 @@ func TestServe(t *testing.T) {
 }
 
 func TestWithLoggingIntegration(t *testing.T) {
-	cfg, _ := config.NewConfig(nil, nil, nil)
+	cfg, _ := config.NewConfig(nil, nil)
 
 	// Простейший хендлер
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
