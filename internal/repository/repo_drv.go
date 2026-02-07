@@ -9,6 +9,7 @@ import (
 type RepoDrvConfig interface {
 	RepoDrv() string
 	ShardSize() byte
+	DBDSN() string
 }
 
 type RepoDrv interface {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,11 @@ import (
 // mockService реализует интерфейс MicroURLService
 type mockService struct {
 	mock.Mock
+}
+
+func (m *mockService) Ping(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(1)
 }
 
 func (m *mockService) AddURL(url string) (string, error) {

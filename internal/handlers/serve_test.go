@@ -16,6 +16,9 @@ type mockHandlers struct {
 	called bool
 }
 
+func (m *mockHandlers) HndlPing() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
+}
 func (m *mockHandlers) HndlAPIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }

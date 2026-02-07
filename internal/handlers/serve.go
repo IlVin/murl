@@ -26,6 +26,7 @@ type MicroURLHandlers interface {
 	HndlAddURL() http.HandlerFunc
 	HndlGetURL() http.HandlerFunc
 	HndlDefault() http.HandlerFunc
+	HndlPing() http.HandlerFunc
 }
 
 // Фабрика роутеров
@@ -50,6 +51,7 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", s.HndlAPIShorten())
 	mux.HandleFunc("POST /{$}", s.HndlAddURL())
+	mux.HandleFunc("GET /ping", s.HndlPing())
 	mux.HandleFunc("GET /{id}", s.HndlGetURL())
 	mux.HandleFunc("/", s.HndlDefault())
 
@@ -73,6 +75,7 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	// Routes
 	r.Post("/api/shorten", s.HndlAPIShorten())
 	r.Post("/", s.HndlAddURL())
+	r.Get("/ping", s.HndlPing())
 	r.Get("/{id}", s.HndlGetURL())
 	r.NotFound(s.HndlDefault())
 	r.MethodNotAllowed(s.HndlDefault())

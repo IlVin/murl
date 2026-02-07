@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ type HandlersConfig interface {
 type MicroURLService interface {
 	AddURL(url string) (string, error)
 	GetURL(url string) (string, error)
+	Ping(ctx context.Context) error
 }
 
 type Handlers struct {
@@ -158,6 +160,30 @@ func (h *Handlers) HndlGetURL() http.HandlerFunc {
 		}
 		w.Header().Add("Location", u)
 		w.WriteHeader(http.StatusTemporaryRedirect)
+	}
+}
+
+// =========== GET /ping ==================
+func (h *Handlers) HndlPing() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				slog.Error("cannot close r.Body",
+					slog.Any("err", err),
+				)
+			}
+		}()
+
+		err := h.service.Ping(r.Context())
+
+		if err != nil {
+			slog.Error("cannot ping database",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
 

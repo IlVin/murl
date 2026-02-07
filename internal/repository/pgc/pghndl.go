@@ -46,10 +46,12 @@ type checkResult struct {
 }
 
 func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, error) {
+	slog.Info("connString", slog.String("connString", connString))
+
 	pool, err := pgxpool.New(ctx, connString)
 
 	if err != nil {
-		return nil, fmt.Errorf("bad connString for pool (connString): %w", err)
+		return nil, fmt.Errorf("bad connString (%s) for pool (connString): %w", connString, err)
 	}
 
 	h := &PgHndl{
