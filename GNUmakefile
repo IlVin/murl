@@ -105,5 +105,7 @@ iter8:
 iter9:
 	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration9$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json
 
+iter10:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration10$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00?pool_max_conns=10'
 
 

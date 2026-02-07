@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"murl/internal/config"
 	"murl/internal/model"
@@ -22,6 +23,11 @@ func (m *mockServiceConfig) ShortBaseURL() config.ShortBaseURL { return m.baseUR
 
 type mockRepo struct {
 	mock.Mock
+}
+
+func (m *mockRepo) Ping(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(1)
 }
 
 func (m *mockRepo) Save(lURL string) (byte, uint64, error) {

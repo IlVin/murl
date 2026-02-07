@@ -20,6 +20,8 @@ type Config struct {
 	shardSize                byte
 	compressibleContentTypes map[string]struct{}
 	eventStoragePath         string
+	dbConfigPath             string
+	dbDSN                    string
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -46,10 +48,16 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			"application/javascript": {},
 		},
 		eventStoragePath: "",
+		dbConfigPath:     "",
+		dbDSN:            "",
 	}
 
 	// Command line arguments
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.Func("d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
+		cfg = cfg.SetDBDSN(s)
+		return nil
+	})
 	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
 		sAddr, err := NewSocketAddr(s)
 		if err != nil {
@@ -85,6 +93,9 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 
 	// Парсинг переменных окружения
+	if val, ok := lookupEnv("DATABASE_DSN"); ok {
+		cfg = cfg.SetDBDSN(val)
+	}
 	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
 		addr, err := NewSocketAddr(val)
 		if err != nil {
@@ -111,6 +122,22 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c Config) DBDSN() string {
+	return c.dbDSN
+}
+func (c Config) SetDBDSN(dbDSN string) Config {
+	c.dbDSN = dbDSN
+	return c
+}
+
+func (c Config) DBConfigPath() string {
+	return c.dbConfigPath
+}
+func (c Config) SetDBConfigPath(dbConfigPath string) Config {
+	c.dbConfigPath = dbConfigPath
+	return c
 }
 
 func (c Config) EventStoragePath() string {

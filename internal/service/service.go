@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"murl/internal/config"
@@ -16,6 +17,7 @@ type ServiceConfig interface {
 type MicroURLRepo interface {
 	Save(lURL string) (byte, uint64, error)
 	Load(sID byte, idx uint64) (string, error)
+	Ping(ctx context.Context) error
 }
 
 type Service struct {
@@ -103,4 +105,8 @@ func (s *Service) GetURL(sURL string) (string, error) {
 	}
 
 	return u, nil
+}
+
+func (s *Service) Ping(ctx context.Context) error {
+	return s.repo.Ping(ctx)
 }

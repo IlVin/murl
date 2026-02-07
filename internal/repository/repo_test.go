@@ -19,8 +19,10 @@ type mockRepoConfig struct {
 	drv       string
 	shardSize byte
 	path      string
+	dbdsn     string
 }
 
+func (m *mockRepoConfig) DBDSN() string            { return m.dbdsn }
 func (m *mockRepoConfig) RepoDrv() string          { return m.drv }
 func (m *mockRepoConfig) ShardSize() byte          { return m.shardSize }
 func (m *mockRepoConfig) EventStoragePath() string { return m.path }

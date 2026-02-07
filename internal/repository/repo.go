@@ -2,9 +2,11 @@ package repository
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log/slog"
 	"murl/internal/model/event"
+	"murl/internal/repository/pgc"
 	"os"
 
 	"github.com/cespare/xxhash/v2"
@@ -14,6 +16,7 @@ import (
 type RepoConfig interface {
 	RepoDrvConfig
 	EventStoragePath() string
+	DBDSN() string
 }
 
 // Поддерживаем драйвера, которые работают с шардами
@@ -24,6 +27,7 @@ type RepoDataDrv interface {
 
 type Repo struct {
 	shardSize byte
+	dbHndl    *pgc.PgHndl
 	db        RepoDataDrv
 	events    chan event.Event
 }
@@ -43,7 +47,26 @@ func NewRepo(cfg RepoConfig) *Repo {
 
 	go eventSaver(cfg, r.events)
 
+	if cfg.DBDSN() != "" {
+		h, err := pgc.NewPgHndl(context.Background(), "PgDB", cfg.DBDSN())
+		if err != nil {
+			slog.Error("cannot connect to PgDB",
+				slog.Any("err", err),
+				slog.String("DBDSN", cfg.DBDSN()),
+			)
+		} else {
+			r.dbHndl = h
+		}
+	}
+
 	return r
+}
+
+func (r *Repo) Ping(ctx context.Context) error {
+	if r.dbHndl == nil {
+		return fmt.Errorf("connect string to database was not set")
+	}
+	return r.dbHndl.Ping(ctx)
 }
 
 // GetShardID возвращает ID шарда для строки.

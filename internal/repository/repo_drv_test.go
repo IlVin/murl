@@ -10,9 +10,11 @@ import (
 // Mock конфигурации
 type mockCfg struct {
 	drv    string
+	dbdsn  string
 	shards byte
 }
 
+func (m mockCfg) DBDSN() string   { return m.dbdsn }
 func (m mockCfg) RepoDrv() string { return m.drv }
 func (m mockCfg) ShardSize() byte { return m.shards }
 
