@@ -3,6 +3,7 @@ package pgc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"runtime/debug"
@@ -15,44 +16,52 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrBadPgConnString = errors.New("Bad connString for pool")
-var ErrPanicRecovered = errors.New("Panic recovered")
-var ErrPgHndlOffline = errors.New("PgHndl offline")
+// PgHndl коннектор, предохраняющий БД от дополнительной нагрузки, когда БД "плохо"
+// и предохраняющий приложение от каскадного сбоя при проблемах с БД
+type PgHndl struct {
+	checkInProgress sync.Mutex
+	name            string
+	host            string
+	pgPool          PgxPoolIface
+	isReady         atomic.Bool
+	isClosed        atomic.Bool
+	lastCheckTime   atomic.Int64
+	lastCheckResult atomic.Value
+	lastLatency     atomic.Int64
+}
 
-type IPgxPool interface {
-	Ping(ctx context.Context) error
+// PgxPoolIface описывает методы pgxpool.Pool.
+// Используем интерфейс, чтобы можно было в тестах замокать БД
+type PgxPoolIface interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+	Ping(ctx context.Context) error
 	Close()
 	Config() *pgxpool.Config
 }
 
-type PgHndl struct {
-	mu              sync.RWMutex
-	name            string
-	pgPool          IPgxPool
-	isReady         atomic.Bool
-	isClosed        atomic.Bool
-	lastCheckTime   time.Time
-	lastCheckResult error
-	checkInProgress sync.Mutex
-	lastLatency     time.Duration
+//go:generate mockgen -destination=pgc_mock_test.go -package=pgc . PgxPoolIface
+
+type checkResult struct {
+	err error
 }
 
 func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, error) {
 	pool, err := pgxpool.New(ctx, connString)
 
 	if err != nil {
-		return nil, errors.Join(ErrBadPgConnString, err)
+		return nil, fmt.Errorf("bad connString for pool (connString): %w", err)
 	}
 
 	h := &PgHndl{
-		name:            name,
-		pgPool:          pool,
-		lastCheckTime:   time.Now(),
-		lastCheckResult: nil,
+		name:   name,
+		pgPool: pool,
+		host:   pool.Config().ConnConfig.Host,
 	}
+
+	h.lastCheckResult.Store(checkResult{err: nil})
 	h.isClosed.Store(false)
-	h.Online()
+
+	h.Ping(ctx)
 
 	return h, nil
 }
@@ -62,7 +71,7 @@ func (h *PgHndl) Name() string {
 }
 
 func (h *PgHndl) Host() string {
-	return h.pgPool.Config().ConnConfig.Host
+	return h.host
 }
 
 func (h *PgHndl) IsReady() bool {
@@ -106,24 +115,19 @@ func (h *PgHndl) Close() {
 	h.pgPool.Close()
 }
 
+// Ping Проверяет работоспособность БД
 func (h *PgHndl) Ping(ctx context.Context) error {
-	tm := time.Now()
-
 	// Быстрая проверка
-	h.mu.RLock()
-	if tm.Sub(h.lastCheckTime) < 3*time.Second {
-		res := h.lastCheckResult
-		h.mu.RUnlock()
-		return res
+	lastCheck := h.lastCheckTime.Load()
+	now := time.Now().UnixNano()
+
+	if now-lastCheck < int64(3*time.Second) {
+		return h.lastCheckResult.Load().(checkResult).err
 	}
-	h.mu.RUnlock()
 
 	// Если не получается взять лок
 	if !h.checkInProgress.TryLock() {
-		h.mu.RLock()
-		res := h.lastCheckResult
-		h.mu.RUnlock()
-		return res
+		return h.lastCheckResult.Load().(checkResult).err
 	}
 
 	defer h.checkInProgress.Unlock()
@@ -136,38 +140,38 @@ func (h *PgHndl) Ping(ctx context.Context) error {
 	err := h.pgPool.Ping(pCtx)
 	duration := time.Since(start)
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	now = time.Now().UnixNano()
+	h.lastCheckTime.Store(now)
+	h.lastCheckResult.Store(checkResult{err: err})
+	h.lastLatency.Store(int64(duration))
 
-	h.lastCheckResult = err
-	h.lastCheckTime = time.Now()
-	h.lastLatency = duration
-
-	if h.lastCheckResult == nil {
+	// Если ошибок нет, то переводим коннект в онлайн
+	if err == nil {
 		h.Online()
 	}
-	if IsNetworkError(h.lastCheckResult) {
+
+	// Если произошла сетевая ошибка или мы не дождались Ping'а, то переводим коннект в Offline
+	if IsNetworkError(err) || errors.Is(err, context.DeadlineExceeded) {
 		h.Offline()
 	}
-	return h.lastCheckResult
+
+	return err
 }
 
 func (h *PgHndl) Latency() time.Duration {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.lastLatency
+	return time.Duration(h.lastLatency.Load())
 }
 
 func (h *PgHndl) Begin(ctx context.Context, cb func(pgx.Tx) error) (err error) {
 	if !h.IsReady() {
 		if errPing := h.Ping(ctx); errPing != nil {
-			return errors.Join(ErrPgHndlOffline, errPing)
+			return fmt.Errorf("database connection is offline: %w", errPing)
 		}
 	}
 
 	tx, err := h.pgPool.Begin(ctx)
 	if err != nil {
-		if IsNetworkError(err) {
+		if IsNetworkError(err) || errors.Is(err, context.DeadlineExceeded) {
 			h.Offline()
 		}
 		return err
@@ -181,9 +185,9 @@ func (h *PgHndl) Begin(ctx context.Context, cb func(pgx.Tx) error) (err error) {
 				slog.String("stack", string(debug.Stack())),
 			)
 			if err == nil {
-				err = ErrPanicRecovered
+				err = fmt.Errorf("panic recovered")
 			} else {
-				err = errors.Join(ErrPanicRecovered, err)
+				err = fmt.Errorf("panic recovered: %w", err)
 			}
 		}
 	}()
