@@ -91,7 +91,7 @@ func (h *PgHndl) Online() {
 	oldVal := h.isReady.Load()
 	h.isReady.Store(true)
 
-	if oldVal == false {
+	if !oldVal {
 		slog.Info("The PgHndl has gone Online",
 			slog.String("name", h.Name()),
 			slog.String("instance", h.Host()),
@@ -103,7 +103,7 @@ func (h *PgHndl) Offline() {
 	oldVal := h.isReady.Load()
 	h.isReady.Store(false)
 
-	if oldVal == true {
+	if oldVal {
 		slog.Info("The PgHndl has gone Offline",
 			slog.String("name", h.Name()),
 			slog.String("instance", h.Host()),
