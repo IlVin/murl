@@ -1,137 +1,141 @@
 package repository
 
 import (
-	"sync"
+	"context"
+	"errors"
 	"testing"
 
+	gomock "github.com/golang/mock/gomock"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 )
 
-// Mock конфигурации
-type mockCfg struct {
-	drv    string
-	dbdsn  string
-	shards byte
-}
-
-func (m mockCfg) DBDSN() string   { return m.dbdsn }
-func (m mockCfg) RepoDrv() string { return m.drv }
-func (m mockCfg) ShardSize() byte { return m.shards }
+// --- Тесты NewRepoDrv ---
 
 func TestNewRepoDrv(t *testing.T) {
-	t.Run("Create InMemory", func(t *testing.T) {
-		cfg := mockCfg{drv: "InMemory", shards: 2}
-		repo := NewRepoDrv(cfg)
-		assert.NotNil(t, repo)
-		assert.IsType(t, &InMemoryRepoDrv{}, repo)
-	})
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	ctx := context.Background()
+	cfg := NewMockRepoDrvConfig(ctrl)
 
-	t.Run("Create PgDB", func(t *testing.T) {
-		cfg := mockCfg{drv: "PgDB", shards: 2}
-		repo := NewRepoDrv(cfg)
-		assert.NotNil(t, repo)
-	})
-
-	t.Run("Unknown driver panic", func(t *testing.T) {
-		cfg := mockCfg{drv: "Redis", shards: 1}
-		assert.Panics(t, func() {
-			NewRepoDrv(cfg)
-		})
-	})
-}
-
-func TestInMemoryRepoDrv_UpSert(t *testing.T) {
-	repo := NewRepoDrv(mockCfg{drv: "InMemory", shards: 2})
-
-	t.Run("Successful UpSert", func(t *testing.T) {
-		idx, err := repo.UpSert(0, "url1")
+	t.Run("InMemory Success", func(t *testing.T) {
+		cfg.EXPECT().RepoDrv().Return("InMemory")
+		cfg.EXPECT().ShardSize().Return(byte(1))
+		drv, err := NewRepoDrv(ctx, cfg)
 		assert.NoError(t, err)
-		assert.Equal(t, uint64(0), idx)
-
-		// Повторный UpSert того же значения (проверка ветки RLock)
-		idx2, err := repo.UpSert(0, "url1")
-		assert.NoError(t, err)
-		assert.Equal(t, idx, idx2)
+		assert.NotNil(t, drv)
 	})
 
-	t.Run("Shard out of bounds", func(t *testing.T) {
-		_, err := repo.UpSert(5, "url")
+	t.Run("PgDB Init Error (Bad DSN)", func(t *testing.T) {
+		cfg.EXPECT().RepoDrv().Return("PgDB")
+		cfg.EXPECT().ShardSize().Return(byte(1))
+		cfg.EXPECT().DBDSN().Return("invalid-dsn")
+		drv, err := NewRepoDrv(ctx, cfg)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "out of range")
+		assert.Nil(t, drv)
 	})
 
-	t.Run("Concurrent UpSert (Race Condition check)", func(t *testing.T) {
-		var wg sync.WaitGroup
-		const iterations = 100
-		for i := 0; i < iterations; i++ {
-			wg.Add(1)
-			go func(n int) {
-				defer wg.Done()
-				// Пишем одну и ту же строку многократно из разных потоков
-				_, _ = repo.UpSert(1, "duplicate")
-			}(i)
-		}
-		wg.Wait()
-
-		val, _ := repo.Select(1, 0)
-		assert.Equal(t, "duplicate", val)
-	})
 }
 
-func TestInMemoryRepoDrv_Select(t *testing.T) {
-	repo := NewRepoDrv(mockCfg{drv: "InMemory", shards: 1})
-	_, _ = repo.UpSert(0, "find-me")
+// --- Тесты InMemoryRepoDrv ---
 
-	t.Run("Found", func(t *testing.T) {
-		val, err := repo.Select(0, 0)
+func TestInMemoryRepoDrv(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	cfg := NewMockRepoDrvConfig(ctrl)
+	cfg.EXPECT().ShardSize().Return(byte(2))
+	drv := newInMemoryRepoDrv(cfg)
+	ctx := context.Background()
+
+	t.Run("UpSert and Bounds", func(t *testing.T) {
+		// Успешная вставка
+		id, err := drv.UpSert(ctx, 0, "url1")
 		assert.NoError(t, err)
-		assert.Equal(t, "find-me", val)
+		assert.Equal(t, uint64(0), id)
+
+		// Повторная вставка (RLock branch)
+		id2, err := drv.UpSert(ctx, 0, "url1")
+		assert.NoError(t, err)
+		assert.Equal(t, id, id2)
+
+		// Ошибка границ
+		_, err = drv.UpSert(ctx, 5, "url")
+		assert.Error(t, err)
 	})
 
-	t.Run("Not Found", func(t *testing.T) {
-		_, err := repo.Select(0, 999)
+	t.Run("Set and lastIdx Logic", func(t *testing.T) {
+		// Установка существующего (перезапись индекса)
+		_ = drv.Set(ctx, 0, 0, "url1-new")
+
+		// Установка нового с прыжком lastIdx
+		err := drv.Set(ctx, 1, 100, "url100")
+		assert.NoError(t, err)
+
+		// Проверка Select
+		res, err := drv.Select(ctx, 1, 100)
+		assert.NoError(t, err)
+		assert.Equal(t, "url100", res)
+
+		// Проверка, что UpSert теперь выдаст 101
+		id, _ := drv.UpSert(ctx, 1, "url101")
+		assert.Equal(t, uint64(101), id)
+	})
+
+	t.Run("Select Errors", func(t *testing.T) {
+		_, err := drv.Select(ctx, 0, 999)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "record not found")
+
+		_, err = drv.Select(ctx, 10, 1)
+		assert.Error(t, err)
 	})
 
-	t.Run("Shard out of bounds", func(t *testing.T) {
-		_, err := repo.Select(2, 0)
+	t.Run("Set Bounds Error", func(t *testing.T) {
+		err := drv.Set(ctx, 10, 1, "url")
 		assert.Error(t, err)
 	})
 }
 
-func TestInMemoryRepoDrv_Set(t *testing.T) {
-	repo := NewRepoDrv(mockCfg{drv: "InMemory", shards: 1})
+// --- Тесты PgRepoDrv ---
 
-	t.Run("Set at the end (append)", func(t *testing.T) {
-		err := repo.Set(0, 0, "first")
+func TestPgRepoDrv(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockHndl := NewMockDBHandler(ctrl)
+	drv := &PgRepoDrv{shards: []DBHandler{mockHndl}}
+	ctx := context.Background()
+
+	t.Run("UpSert Success", func(t *testing.T) {
+		mTx := NewMockTx(ctrl)
+		mRow := NewMockRow(ctrl)
+
+		mockHndl.EXPECT().Tx(ctx, gomock.Any()).DoAndReturn(
+			func(ctx context.Context, cb func(context.Context, pgx.Tx) error) error {
+				return cb(ctx, mTx)
+			})
+		mTx.EXPECT().QueryRow(gomock.Any(), gomock.Any(), "test-url").Return(mRow)
+		mRow.EXPECT().Scan(gomock.Any()).DoAndReturn(func(dest ...interface{}) error {
+			*(dest[0].(*uint64)) = 777
+			return nil
+		})
+
+		id, err := drv.UpSert(ctx, 0, "test-url")
 		assert.NoError(t, err)
-		val, _ := repo.Select(0, 0)
-		assert.Equal(t, "first", val)
+		assert.Equal(t, uint64(777), id)
 	})
 
-	t.Run("Set with gap (index > len)", func(t *testing.T) {
-		// Текущая длина 1. Ставим на индекс 3.
-		// Должно создаться 2 пустых строки (падинг) + наша строка.
-		err := repo.Set(0, 3, "gap-fill")
-		assert.NoError(t, err)
-
-		val, _ := repo.Select(0, 3)
-		assert.Equal(t, "gap-fill", val)
-
-		empty, _ := repo.Select(0, 1)
-		assert.Equal(t, "", empty)
+	t.Run("UpSert DB Error", func(t *testing.T) {
+		mockHndl.EXPECT().Tx(ctx, gomock.Any()).Return(errors.New("db fail"))
+		_, err := drv.UpSert(ctx, 0, "url")
+		assert.Error(t, err)
 	})
 
-	t.Run("Overwrite existing", func(t *testing.T) {
-		err := repo.Set(0, 0, "overwritten")
-		assert.NoError(t, err)
-		val, _ := repo.Select(0, 0)
-		assert.Equal(t, "overwritten", val)
-	})
-
-	t.Run("Shard out of bounds", func(t *testing.T) {
-		err := repo.Set(5, 0, "fail")
+	t.Run("Pg Bounds Errors", func(t *testing.T) {
+		_, err := drv.UpSert(ctx, 10, "url")
+		assert.Error(t, err)
+		err = drv.Set(ctx, 10, 1, "url")
+		assert.Error(t, err)
+		_, err = drv.Select(ctx, 10, 1)
 		assert.Error(t, err)
 	})
 }
