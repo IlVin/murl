@@ -3,10 +3,17 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
+
+const bodyLimit = 1024 * 1024
+
+//go:generate mockgen -source=$GOFILE -destination=handlers_mocks_test.go -package=$GOPACKAGE
 
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
@@ -14,8 +21,8 @@ type HandlersConfig interface {
 
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
-	AddURL(url string) (string, error)
-	GetURL(url string) (string, error)
+	AddURL(ctx context.Context, url string) (string, error)
+	GetURL(ctx context.Context, url string) (string, error)
 	Ping(ctx context.Context) error
 }
 
@@ -29,32 +36,52 @@ func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	}
 }
 
+func readBody(r *http.Request) ([]byte, error) {
+	// Ограничиваем чтение, чтобы избежать переполнения памяти
+	lr := io.LimitReader(r.Body, bodyLimit+1)
+
+	buf, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, fmt.Errorf("body read failed: %w", err)
+	}
+
+	if len(buf) > bodyLimit {
+		return nil, errors.New("request body too large")
+	}
+
+	// Если ничего не прислали
+	if len(buf) == 0 {
+		return nil, errors.New("request body is empty")
+	}
+
+	return buf, nil
+}
+
 // =========== POST / ==================
 func (h *Handlers) HndlAddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				slog.Error("cannot close r.Body",
-					slog.Any("err", err),
-				)
-			}
-		}()
-		buf, err := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		buf, err := readBody(r)
 		if err != nil {
-			slog.Error("cannot read Body",
+			slog.Error("request body validation failed",
 				slog.Any("err", err),
 			)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		murl, err := h.service.AddURL(string(buf))
-
-		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		w.Header().Add("Content-Type", "text/plain")
+		murl, err := h.service.AddURL(r.Context(), string(buf))
+
+		if err != nil {
+			slog.Warn("service cannot add URL",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusCreated)
 		if _, err := w.Write([]byte(murl)); err != nil {
 			slog.Warn("failed to write response",
@@ -70,21 +97,15 @@ type APIShortenReq struct {
 	URL string `json:"url"`
 }
 
-type TAPIShortenResp struct {
+type APIShortenResp struct {
 	Result string `json:"result"`
 }
 
 func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				slog.Error("cannot close r.Body",
-					slog.Any("err", err),
-				)
-			}
-		}()
+		defer r.Body.Close()
 
-		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 			slog.Warn("invalid Content-Type",
 				slog.String("Content-Type", ct),
 			)
@@ -92,17 +113,17 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			return
 		}
 
-		buf, err := io.ReadAll(r.Body)
+		buf, err := readBody(r)
 		if err != nil {
-			slog.Error("cannot read Body",
+			slog.Error("request body validation failed",
 				slog.Any("err", err),
 			)
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
 		var jsReq APIShortenReq
-		var jsResp TAPIShortenResp
+		var jsResp APIShortenResp
 
 		err = json.Unmarshal(buf, &jsReq)
 		if err != nil {
@@ -113,8 +134,7 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			return
 		}
 
-		jsResp.Result, err = h.service.AddURL(jsReq.URL)
-
+		res, err := h.service.AddURL(r.Context(), jsReq.URL)
 		if err != nil {
 			slog.Warn("internal error",
 				slog.Any("err", err),
@@ -122,19 +142,20 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		jsResp.Result = res
 
-		buf, err = json.Marshal(&jsResp)
+		data, err := json.Marshal(jsResp)
 		if err != nil {
-			slog.Warn("internal error",
+			slog.Error("failed to encode response",
 				slog.Any("err", err),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		w.Header().Add("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		if _, err := w.Write(buf); err != nil {
+		if _, err := w.Write(data); err != nil {
 			slog.Debug("failed to write response",
 				slog.String("event", "network_error"),
 				slog.Any("err", err),
@@ -146,19 +167,12 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 // =========== GET /{shortURL} ==================
 func (h *Handlers) HndlGetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				slog.Error("cannot close r.Body",
-					slog.Any("err", err),
-				)
-			}
-		}()
-		u, err := h.service.GetURL(r.URL.String())
+		u, err := h.service.GetURL(r.Context(), r.URL.String())
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		w.Header().Add("Location", u)
+		w.Header().Set("Location", u)
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}
 }
@@ -166,21 +180,13 @@ func (h *Handlers) HndlGetURL() http.HandlerFunc {
 // =========== GET /ping ==================
 func (h *Handlers) HndlPing() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				slog.Error("cannot close r.Body",
-					slog.Any("err", err),
-				)
-			}
-		}()
-
 		err := h.service.Ping(r.Context())
 
 		if err != nil {
 			slog.Error("cannot ping database",
 				slog.Any("err", err),
 			)
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -190,13 +196,6 @@ func (h *Handlers) HndlPing() http.HandlerFunc {
 // =========== DEFAULT ==================
 func (h *Handlers) HndlDefault() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				slog.Error("cannot close r.Body",
-					slog.Any("err", err),
-				)
-			}
-		}()
 		w.WriteHeader(http.StatusBadRequest)
 	}
 }
