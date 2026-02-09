@@ -18,7 +18,6 @@ type RepoDrvConfig interface {
 	ShardSize() byte
 	DBDSN() string
 	EventStoragePath() string
-	MigrationsDir() string
 }
 
 type RepoDrv interface {
@@ -39,7 +38,7 @@ func NewRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 		return drv, nil
 	}
 
-	return nil, fmt.Errorf("Unknown repo driver: %s", cfg.RepoDrv())
+	return nil, fmt.Errorf("unknown repo driver: %s", cfg.RepoDrv())
 }
 
 // =============================================
@@ -183,7 +182,7 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 		return nil, fmt.Errorf("failed create PgRepoDrv: %w", err)
 	}
 
-	pgHndl.RunMigrations(ctx, cfg.MigrationsDir())
+	pgHndl.RunMigrations(ctx)
 
 	for i := 0; i < shardSize; i++ {
 		r.shards[i] = pgHndl
@@ -215,7 +214,7 @@ func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint6
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("Failed to execute query (%s): %w", sql, err)
+		return 0, fmt.Errorf("failed to execute query (%s): %w", sql, err)
 	}
 
 	return id, nil
@@ -240,7 +239,7 @@ func (s *PgRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u string)
 	})
 
 	if err != nil {
-		return fmt.Errorf("Failed to execute query (%s): %w", sql, err)
+		return fmt.Errorf("failed to execute query (%s): %w", sql, err)
 	}
 
 	return nil
@@ -265,7 +264,7 @@ func (s *PgRepoDrv) Select(ctx context.Context, shardID byte, idx uint64) (strin
 	})
 
 	if err != nil {
-		return "", fmt.Errorf("Failed to execute query (%s): %w", sql, err)
+		return "", fmt.Errorf("failed to execute query (%s): %w", sql, err)
 	}
 
 	return u, nil

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"murl/migrations"
 	"net"
-	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -96,18 +96,8 @@ func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, er
 	return h, nil
 }
 
-func (h *PgHndl) RunMigrations(ctx context.Context, migrationsDir string) error {
-	// Проверяем существование папки с миграциями
-	info, err := os.Stat(migrationsDir)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("Directory [%s] does not exist", migrationsDir)
-	}
-	if err != nil {
-		return fmt.Errorf("Directory [%s] error: %w", migrationsDir, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("Path [%s] is not directory", migrationsDir)
-	}
+func (h *PgHndl) RunMigrations(ctx context.Context) error {
+	goose.SetBaseFS(migrations.MigrationsDir)
 
 	// Устанавливаем диалект базы данных для goose
 	if err := goose.SetDialect("postgres"); err != nil {
@@ -117,9 +107,12 @@ func (h *PgHndl) RunMigrations(ctx context.Context, migrationsDir string) error 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	migrationsPath := "."
+
 	slog.Info("Running migrations",
 		slog.String("name", h.Name()),
 		slog.String("db", h.Host()),
+		slog.String("migrations path", migrationsPath),
 	)
 
 	// Превращаем *pgxpool.Pool в *sql.DB без создания нового физического пула.
@@ -127,7 +120,7 @@ func (h *PgHndl) RunMigrations(ctx context.Context, migrationsDir string) error 
 	defer db.Close()
 
 	// Выполняем миграции
-	if err := goose.UpContext(ctx, db, migrationsDir); err != nil {
+	if err := goose.UpContext(ctx, db, migrationsPath); err != nil {
 		return fmt.Errorf("failed to migrate PgHndl %s: %w", h.Host(), err)
 	}
 
