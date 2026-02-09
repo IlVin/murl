@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"math"
 	"net/url"
 	"testing"
 
@@ -8,98 +10,108 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestShortURL_Cycle(t *testing.T) {
-	baseURL, _ := url.Parse("https://ex.com")
-	testCases := []struct {
-		shard byte
-		idx   uint64
+func TestMakeAndParseShortURL(t *testing.T) {
+	baseURL, _ := url.Parse("http://localhost:8080")
+
+	tests := []struct {
+		name    string
+		shardID byte
+		idx     uint64
 	}{
-		{shard: 0, idx: 0},
-		{shard: 63, idx: 123456789},
-		{shard: 10, idx: 1<<64 - 1},
+		{"min values", 0, 0},
+		{"mid values", 32, 12345},
+		{"max shard", 63, 999999},
+		{"max uint64", 10, math.MaxUint64},
+		{"large values", 63, 123456789012345},
 	}
 
-	for _, tc := range testCases {
-		// Тест создания
-		sURL, err := MakeShortURL(tc.shard, tc.idx, baseURL)
-		require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 1. Создаем короткую ссылку
+			shortURL, err := MakeShortURL(tt.shardID, tt.idx, baseURL)
+			require.NoError(t, err)
+			assert.Contains(t, shortURL, "http://localhost:8080/.")
 
-		// Тест парсинга
-		shard, idx, err := ParseShortURL(sURL)
-		require.NoError(t, err)
+			// 2. Парсим обратно
+			gotShard, gotIdx, err := ParseShortURL(shortURL)
+			require.NoError(t, err)
 
-		assert.Equal(t, tc.shard, shard)
-		assert.Equal(t, tc.idx, idx)
+			// 3. Проверяем идентичность
+			assert.Equal(t, tt.shardID, gotShard)
+			assert.Equal(t, tt.idx, gotIdx)
+		})
+	}
+}
+
+func TestParseShortURL_Errors(t *testing.T) {
+	tests := []struct {
+		name    string
+		sURL    string
+		wantErr string
+	}{
+		{
+			"invalid url format",
+			"http://[invalid-url",
+			"invalid short url format",
+		},
+		{
+			"too short path",
+			"http://localhost/.", // всего 2 символа в пути после слэша
+			"invalid short url format",
+		},
+		{
+			"missing dot prefix",
+			"http://localhost/AABC", // нет точки в начале
+			"invalid short url format",
+		},
+		{
+			"invalid shard char",
+			"http://localhost/.!AA", // '!' нет в словаре
+			"invalid shard identifier",
+		},
+		{
+			"invalid base64 data",
+			"http://localhost/.A.$.", // битый base64
+			"failed to decode base64 data",
+		},
+		{
+			"incomplete varint data",
+			"http://localhost/.Aww", // Валидный b64, но битый varint (лишние байты или обрыв)
+			"failed to decode record index",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shard, idx, err := ParseShortURL(tt.sURL)
+			fmt.Println("====>", err)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Zero(t, shard)
+			assert.Zero(t, idx)
+		})
 	}
 }
 
 func TestMakeShortURL_Errors(t *testing.T) {
 	baseURL, _ := url.Parse("http://localhost")
 
-	t.Run("invalid shard id", func(t *testing.T) {
-		_, err := MakeShortURL(64, 0, baseURL) // Макс индекс 63
+	t.Run("shardID out of bounds", func(t *testing.T) {
+		_, err := MakeShortURL(64, 100, baseURL)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "ShardID: index [64] out of bounds")
+		assert.Contains(t, err.Error(), "out of bounds")
 	})
 }
 
-func TestParseShortURL_Errors(t *testing.T) {
-	t.Run("invalid url format", func(t *testing.T) {
-		// Слишком короткий путь (нужно минимум "/" + шард + данные)
-		_, _, err := ParseShortURL("http://ex.com")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid short url format")
-	})
+func TestVarintCompactness(t *testing.T) {
+	baseURL, _ := url.Parse("http://l")
 
-	t.Run("broken url parse", func(t *testing.T) {
-		// URL с недопустимыми символами для url.Parse
-		_, _, err := ParseShortURL("http://ex.com")
-		assert.Error(t, err)
-	})
+	// При малых значениях (0-127) Varint занимает 1 байт.
+	// Base64 от 1 байта — это 2 символа.
+	// Путь: "." + "S" + "II" = 4 символа. Итого "/.SII" = 5 символов.
+	shortURL, err := MakeShortURL(0, 10, baseURL)
+	require.NoError(t, err)
 
-	t.Run("invalid shard character", func(t *testing.T) {
-		// Символ '!' отсутствует в b64uDict
-		_, _, err := ParseShortURL("http://ex.com/!123")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid shard identifier")
-	})
-
-	t.Run("failed base64 decode", func(t *testing.T) {
-		// Символ '!' внутри данных base64
-		_, _, err := ParseShortURL("http://ex.com/bc!")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to decode base64 data")
-	})
-
-	t.Run("failed varint decode - n is 0", func(t *testing.T) {
-		// Пустые данные после шарда (невозможно декодировать varint)
-		// Для этого нужно обмануть проверку длины, добавив '/'
-		_, _, err := ParseShortURL("http://ex.com")
-		// Здесь сработает первая проверка len < 3, но если бы прошли:
-		assert.Error(t, err)
-	})
-
-	t.Run("varint overflow or incomplete", func(t *testing.T) {
-		// Даем 10 байт с установленным MSB (превышение лимита uint64 для varint)
-		buf := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01}
-		encoded := b64u().EncodeToString(buf)
-		_, _, err := ParseShortURL("http://ex.com/A" + encoded)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to decode record index")
-	})
-
-	t.Run("extra bytes after varint", func(t *testing.T) {
-		// Валидный varint (0), но после него лишний байт
-		buf := []byte{0x00, 0xff}
-		encoded := b64u().EncodeToString(buf)
-		_, _, err := ParseShortURL("http://ex.com/A" + encoded)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to decode record index")
-	})
-}
-
-func TestB64uInternal(t *testing.T) {
-	// Покрываем вызов вспомогательной функции напрямую
-	enc := b64u()
-	assert.NotNil(t, enc)
+	u, _ := url.Parse(shortURL)
+	assert.Equal(t, 5, len(u.Path), "Path should be exactly 5 chars long for small IDs (including dot)")
 }

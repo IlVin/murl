@@ -16,20 +16,24 @@ func b64u() *base64.Encoding {
 
 func ParseShortURL(sURL string) (shardID byte, idx uint64, err error) {
 	u, err := url.Parse(sURL)
-	// Путь должен быть минимум 3 символа: "/" + "шард" + "минимум 1 байт данных"
-	if err != nil || len(u.Path) < 3 {
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid short url format (%s): %w", sURL, err)
+	}
+	//  "/" + "." + "S" + "II" (минимум 5 байт)
+	if len(u.Path) < 5 || u.Path[0:2] != "/." {
 		return 0, 0, fmt.Errorf("invalid short url format: %s", sURL)
 	}
 
 	// Извлекаем шард из первого символа после слэша
-	pos := strings.Index(b64uDict, string(u.Path[1]))
+	shardChar := u.Path[2] // Берем байт, так как словарь ASCII
+	pos := strings.IndexByte(b64uDict, shardChar)
 	if pos < 0 {
-		return 0, 0, fmt.Errorf("invalid shard identifier: '%s'", string(u.Path[1]))
+		return 0, 0, fmt.Errorf("invalid shard identifier: '%c'", shardChar)
 	}
 	shardID = byte(pos)
 
 	// Декодируем индекс из остатка пути
-	data, err := b64u().DecodeString(u.Path[2:])
+	data, err := b64u().DecodeString(u.Path[3:])
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to decode base64 data: %w", err)
 	}
@@ -53,7 +57,7 @@ func MakeShortURL(shardID byte, idx uint64, baseURL *url.URL) (string, error) {
 
 	// Формируем путь: 1 символ словаря для шарда + base64 от индекса
 	encodedIdx := b64u().EncodeToString(buf[:n])
-	shortPath := b64uDict[shardID:shardID+1] + encodedIdx
+	shortPath := "." + b64uDict[shardID:shardID+1] + encodedIdx
 
 	// Создаем копию URL, чтобы не мутировать оригинал
 	resURL := *baseURL
