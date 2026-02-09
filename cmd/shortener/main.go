@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
@@ -26,6 +27,9 @@ func main() {
 
 func run() error {
 
+	// Global Context
+	ctx := context.Background()
+
 	// Загрузка .env
 	_ = godotenv.Load()
 
@@ -44,11 +48,11 @@ func run() error {
 	)
 
 	// Репозиторий
-	repo := repository.NewRepo(cfg)
+	repo := repository.NewRepo(ctx, cfg)
 	defer repo.Close()
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
-	srv := service.NewService(cfg, repo)
+	srv := service.NewService(ctx, cfg, repo)
 
 	// HTTP хэндлеры, связанные вызовами с service
 	h := handlers.NewHandlers(cfg, srv)
