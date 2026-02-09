@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+
+	goose "github.com/pressly/goose/v3"
 )
 
 // ========= [ Какую проблему решает этот модуль ] ===========
@@ -39,13 +43,14 @@ import (
 type pgPoolProvider interface {
 	Begin(context.Context) (pgx.Tx, error)
 	Ping(context.Context) error
+	Config() *pgxpool.Config
 	Close()
 }
 
 // PgHndl коннектор, предохраняющий БД от дополнительной нагрузки, когда БД "плохо"
 // и предохраняющий приложение от каскадного сбоя при проблемах с БД
 type PgHndl struct {
-	checkInProgress sync.Mutex
+	mu              sync.Mutex
 	_               cpu.CacheLinePad // Выравнивание на случай, когда нужно работать с массивом PgHndls
 	name            string
 	host            string
@@ -69,11 +74,13 @@ func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, er
 		return nil, fmt.Errorf("bad connString for pool: %w", err)
 	}
 
+	connCfg := pool.Config().ConnConfig
+
 	h := &PgHndl{
 		name:       name,
 		pgPoolProv: pool,
 		pgPool:     pool,
-		host:       pool.Config().ConnConfig.Host,
+		host:       fmt.Sprintf("%s:%d/%s", connCfg.Host, connCfg.Port, connCfg.Database),
 	}
 
 	h.lastCheckResult.Store(checkResult{
@@ -87,6 +94,49 @@ func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, er
 	h.Ping(ctx)
 
 	return h, nil
+}
+
+func (h *PgHndl) RunMigrations(ctx context.Context, migrationsDir string) error {
+	// Проверяем существование папки с миграциями
+	info, err := os.Stat(migrationsDir)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("Directory [%s] does not exist", migrationsDir)
+	}
+	if err != nil {
+		return fmt.Errorf("Directory [%s] error: %w", migrationsDir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("Path [%s] is not directory", migrationsDir)
+	}
+
+	// Устанавливаем диалект базы данных для goose
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	slog.Info("Running migrations",
+		slog.String("name", h.Name()),
+		slog.String("db", h.Host()),
+	)
+
+	// Превращаем *pgxpool.Pool в *sql.DB без создания нового физического пула.
+	db := stdlib.OpenDB(*h.pgPoolProv.Config().ConnConfig)
+	defer db.Close()
+
+	// Выполняем миграции
+	if err := goose.UpContext(ctx, db, migrationsDir); err != nil {
+		return fmt.Errorf("failed to migrate PgHndl %s: %w", h.Host(), err)
+	}
+
+	slog.Info("Successfully migrated database",
+		slog.String("name", h.Name()),
+		slog.String("db", h.Host()),
+	)
+
+	return nil
 }
 
 // HandleDBError Логика, переводящая хэндл в онлайн или оффлайн
@@ -165,14 +215,14 @@ func (h *PgHndl) Ping(ctx context.Context) error {
 	}
 
 	// Если не получается взять лок
-	if !h.checkInProgress.TryLock() {
+	if !h.mu.TryLock() {
 		if res, ok := h.lastCheckResult.Load().(checkResult); ok {
 			return res.err
 		}
 		return nil
 	}
 
-	defer h.checkInProgress.Unlock()
+	defer h.mu.Unlock()
 
 	pCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 1*time.Second)
 	defer cancel()

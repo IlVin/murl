@@ -64,6 +64,20 @@ func (mr *MockRepoDrvConfigMockRecorder) EventStoragePath() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EventStoragePath", reflect.TypeOf((*MockRepoDrvConfig)(nil).EventStoragePath))
 }
 
+// MigrationsDir mocks base method.
+func (m *MockRepoDrvConfig) MigrationsDir() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MigrationsDir")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// MigrationsDir indicates an expected call of MigrationsDir.
+func (mr *MockRepoDrvConfigMockRecorder) MigrationsDir() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MigrationsDir", reflect.TypeOf((*MockRepoDrvConfig)(nil).MigrationsDir))
+}
+
 // RepoDrv mocks base method.
 func (m *MockRepoDrvConfig) RepoDrv() string {
 	m.ctrl.T.Helper()

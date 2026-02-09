@@ -20,6 +20,7 @@ type RepoConfig interface {
 	ShardSize() byte
 	DBDSN() string
 	EventStoragePath() string
+	MigrationsDir() string
 }
 
 // Поддерживаем драйвера, которые работают с шардами

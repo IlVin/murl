@@ -22,6 +22,7 @@ type Config struct {
 	eventStoragePath         string
 	dbConfigPath             string
 	dbDSN                    string
+	migrationsDir            string
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -50,6 +51,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		eventStoragePath: "",
 		dbConfigPath:     "",
 		dbDSN:            "",
+		migrationsDir:    "./migrations",
 	}
 
 	// Command line arguments
@@ -121,7 +123,18 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		}
 	}
 
+	if cfg.DBDSN() != "" {
+		cfg = cfg.SetRepoDrv("PgDB")
+	}
 	return cfg, nil
+}
+
+func (c Config) MigrationsDir() string {
+	return c.migrationsDir
+}
+func (c Config) SetMigrationsDir(migrationsDir string) Config {
+	c.migrationsDir = migrationsDir
+	return c
 }
 
 func (c Config) DBDSN() string {

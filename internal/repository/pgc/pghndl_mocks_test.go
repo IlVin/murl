@@ -10,6 +10,7 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 	pgx "github.com/jackc/pgx/v5"
+	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 )
 
 // MockpgPoolProvider is a mock of pgPoolProvider interface.
@@ -60,6 +61,20 @@ func (m *MockpgPoolProvider) Close() {
 func (mr *MockpgPoolProviderMockRecorder) Close() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockpgPoolProvider)(nil).Close))
+}
+
+// Config mocks base method.
+func (m *MockpgPoolProvider) Config() *pgxpool.Config {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Config")
+	ret0, _ := ret[0].(*pgxpool.Config)
+	return ret0
+}
+
+// Config indicates an expected call of Config.
+func (mr *MockpgPoolProviderMockRecorder) Config() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Config", reflect.TypeOf((*MockpgPoolProvider)(nil).Config))
 }
 
 // Ping mocks base method.

@@ -93,8 +93,8 @@ func (s *PgHndlTestSuite) TestPing_CachingAndLocking() {
 
 	s.Run("Locking (TryLock)", func() {
 		s.h.lastCheckResult.Store(checkResult{timestamp: time.Now().Add(-10 * time.Second)})
-		s.h.checkInProgress.Lock() // Симулируем другой процесс пинга
-		defer s.h.checkInProgress.Unlock()
+		s.h.mu.Lock() // Симулируем другой процесс пинга
+		defer s.h.mu.Unlock()
 
 		err := s.h.Ping(context.Background())
 		assert.NoError(s.T(), err, "Should return nil if check in progress")

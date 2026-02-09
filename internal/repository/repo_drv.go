@@ -18,6 +18,7 @@ type RepoDrvConfig interface {
 	ShardSize() byte
 	DBDSN() string
 	EventStoragePath() string
+	MigrationsDir() string
 }
 
 type RepoDrv interface {
@@ -181,6 +182,8 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed create PgRepoDrv: %w", err)
 	}
+
+	pgHndl.RunMigrations(ctx, cfg.MigrationsDir())
 
 	for i := 0; i < shardSize; i++ {
 		r.shards[i] = pgHndl
