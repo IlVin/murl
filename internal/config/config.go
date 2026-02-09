@@ -121,6 +121,9 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		}
 	}
 
+	if cfg.DBDSN() != "" {
+		cfg = cfg.SetRepoDrv("PgDB")
+	}
 	return cfg, nil
 }
 

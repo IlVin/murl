@@ -5,178 +5,290 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"murl/migrations"
 	"net"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sys/cpu"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+
+	goose "github.com/pressly/goose/v3"
 )
+
+// ========= [ Какую проблему решает этот модуль ] ===========
+// Модуль реализует паттерн Circuit Breaker (Предохранитель)
+//
+// В распределенных системах одна из самых опасных проблем — это каскадный сбой.
+// Если база данных (БД) начинает тормозить или временно становится недоступной,
+// приложение может «захлебнуться», бесконечно пытаясь установить новые соединения,
+// занимая потоки выполнения и память в ожидании тайм-аутов. Это приводит к тому,
+// что ложится и сервис, и база.
+// Модуль PgHndl решает следующие задачи:
+// + Защита БД от перегрузки (Fail-Fast): Если БД «плохо», коннектор переходит в состояние Offline.
+// + Защита приложения от зависания: Приложение не ждет стандартных долгих тайм-аутов TCP/Postgres, а анализирует флаг IsReady
+// + Автоматическое восстановление (Self-Healing): Через метод Ping и логику в HandleDBError коннектор периодически проверяет состояние базы.
+// + Безопасное выполнение (Panic Recovery): Методы Tx (транзакция) и PgPool (прямой доступ) оборачивают вызовы пользовательских функций в recover().
+
+//go:generate mockgen -source=$GOFILE -destination=pghndl_mocks_test.go -package=$GOPACKAGE
+
+// Чтобы написать UNIT тесты вводим интерфейс.
+// pgPoolProvider описывает методы pgxpool.Pool, используемые модулем PgHndl
+type pgPoolProvider interface {
+	Begin(context.Context) (pgx.Tx, error)
+	Ping(context.Context) error
+	Config() *pgxpool.Config
+	Close()
+}
 
 // PgHndl коннектор, предохраняющий БД от дополнительной нагрузки, когда БД "плохо"
 // и предохраняющий приложение от каскадного сбоя при проблемах с БД
 type PgHndl struct {
-	checkInProgress sync.Mutex
+	mu              sync.Mutex
+	_               cpu.CacheLinePad // Выравнивание на случай, когда нужно работать с массивом PgHndls
 	name            string
 	host            string
-	pgPool          PgxPoolIface
+	pgPoolProv      pgPoolProvider // PgHndl управляет pgx пулом через интерфейс
+	pgPool          *pgxpool.Pool  // А в колбек передается оригинальный объект
 	isReady         atomic.Bool
 	isClosed        atomic.Bool
-	lastCheckTime   atomic.Int64
 	lastCheckResult atomic.Value
-	lastLatency     atomic.Int64
 }
-
-// PgxPoolIface описывает методы pgxpool.Pool.
-// Используем интерфейс, чтобы можно было в тестах замокать БД
-type PgxPoolIface interface {
-	Begin(ctx context.Context) (pgx.Tx, error)
-	Ping(ctx context.Context) error
-	Close()
-	Config() *pgxpool.Config
-}
-
-//go:generate mockgen -destination=pgc_mock_test.go -package=pgc . PgxPoolIface
 
 type checkResult struct {
-	err error
+	err       error
+	timestamp time.Time
+	latency   time.Duration
 }
 
 func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, error) {
-	slog.Info("connString", slog.String("connString", connString))
-
 	pool, err := pgxpool.New(ctx, connString)
 
 	if err != nil {
-		return nil, fmt.Errorf("bad connString (%s) for pool (connString): %w", connString, err)
+		return nil, fmt.Errorf("bad connString for pool: %w", err)
 	}
+
+	connCfg := pool.Config().ConnConfig
 
 	h := &PgHndl{
-		name:   name,
-		pgPool: pool,
-		host:   pool.Config().ConnConfig.Host,
+		name:       name,
+		pgPoolProv: pool,
+		pgPool:     pool,
+		host:       fmt.Sprintf("%s:%d/%s", connCfg.Host, connCfg.Port, connCfg.Database),
 	}
 
-	h.lastCheckResult.Store(checkResult{err: nil})
+	h.lastCheckResult.Store(checkResult{
+		timestamp: time.Now().Add(-5 * time.Second),
+		latency:   0,
+		err:       nil,
+	})
 	h.isClosed.Store(false)
+	h.isReady.Store(false)
 
 	h.Ping(ctx)
 
 	return h, nil
 }
 
+func (h *PgHndl) RunMigrations(ctx context.Context) error {
+	goose.SetBaseFS(migrations.MigrationsDir)
+
+	// Устанавливаем диалект базы данных для goose
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	migrationsPath := "."
+
+	slog.Info("Running migrations",
+		slog.String("name", h.Name()),
+		slog.String("db", h.Host()),
+		slog.String("migrations path", migrationsPath),
+	)
+
+	// Превращаем *pgxpool.Pool в *sql.DB без создания нового физического пула.
+	db := stdlib.OpenDB(*h.pgPoolProv.Config().ConnConfig)
+	defer db.Close()
+
+	// Выполняем миграции
+	if err := goose.UpContext(ctx, db, migrationsPath); err != nil {
+		return fmt.Errorf("failed to migrate PgHndl %s: %w", h.Host(), err)
+	}
+
+	slog.Info("Successfully migrated database",
+		slog.String("name", h.Name()),
+		slog.String("db", h.Host()),
+	)
+
+	return nil
+}
+
+// HandleDBError Логика, переводящая хэндл в онлайн или оффлайн
+func (h *PgHndl) HandleDBError(err error) error {
+	if err != nil && (IsNetworkError(err) || errors.Is(err, context.DeadlineExceeded)) {
+		h.Offline()
+	} else if !h.IsReady() {
+		h.Online()
+	}
+	return err
+}
+
+// Name имя хэндла, заданное при инициализации
 func (h *PgHndl) Name() string {
 	return h.name
 }
 
+// Host hostname:port соединения к БД
 func (h *PgHndl) Host() string {
 	return h.host
 }
 
-func (h *PgHndl) IsReady() bool {
-	return h.isReady.Load()
+// Latency в наносекундах
+func (h *PgHndl) Latency() time.Duration {
+	if res, ok := h.lastCheckResult.Load().(checkResult); ok {
+		return res.latency
+	}
+	return 0
 }
 
+// IsReady DB готова к работе, если нет проблем с ошибками и коннект не закрыт
+func (h *PgHndl) IsReady() bool {
+	return h.isReady.Load() && !h.isClosed.Load()
+}
+
+// Online перевод хэндла в IsReady режим
 func (h *PgHndl) Online() {
 	if h.isClosed.Load() {
-		slog.Error("The PgHndl closed",
-			slog.String("name", h.Name()),
-			slog.String("instance", h.Host()),
-		)
 		return
 	}
-	oldVal := h.isReady.Load()
-	h.isReady.Store(true)
-
-	if !oldVal {
-		slog.Info("The PgHndl has gone Online",
-			slog.String("name", h.Name()),
-			slog.String("instance", h.Host()),
-		)
+	if h.isReady.CompareAndSwap(false, true) {
+		slog.Info("The PgHndl has gone Online", slog.String("name", h.name), slog.String("instance", h.host))
 	}
 }
 
+// Offline перевод хэндла в !IsReady режим
 func (h *PgHndl) Offline() {
-	oldVal := h.isReady.Load()
-	h.isReady.Store(false)
-
-	if oldVal {
-		slog.Info("The PgHndl has gone Offline",
-			slog.String("name", h.Name()),
-			slog.String("instance", h.Host()),
-		)
+	if h.isReady.CompareAndSwap(true, false) {
+		slog.Info("The PgHndl has gone Offline", slog.String("name", h.name), slog.String("instance", h.host))
 	}
 }
 
+// Close перевод хэндла в IsClosed && !IsReady режим
 func (h *PgHndl) Close() {
-	h.isClosed.Store(true)
 	h.Offline()
-	h.pgPool.Close()
+	h.isClosed.Store(true)
+	h.pgPoolProv.Close()
+	slog.Info("The PgHndl closed",
+		slog.String("name", h.Name()),
+		slog.String("instance", h.Host()),
+	)
 }
 
 // Ping Проверяет работоспособность БД
 func (h *PgHndl) Ping(ctx context.Context) error {
-	// Быстрая проверка
-	lastCheck := h.lastCheckTime.Load()
-	now := time.Now().UnixNano()
+	// Защита от nil контекста, чтобы WithoutCancel не паниковал
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	if now-lastCheck < int64(3*time.Second) {
-		return h.lastCheckResult.Load().(checkResult).err
+	// Быстрая проверка
+	if res, ok := h.lastCheckResult.Load().(checkResult); ok {
+		if time.Since(res.timestamp) < 3*time.Second {
+			return res.err
+		}
 	}
 
 	// Если не получается взять лок
-	if !h.checkInProgress.TryLock() {
-		return h.lastCheckResult.Load().(checkResult).err
+	if !h.mu.TryLock() {
+		if res, ok := h.lastCheckResult.Load().(checkResult); ok {
+			return res.err
+		}
+		return nil
 	}
 
-	defer h.checkInProgress.Unlock()
+	defer h.mu.Unlock()
 
-	pCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	pCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 1*time.Second)
 	defer cancel()
 
 	// Продолжительный Ping
 	start := time.Now()
-	err := h.pgPool.Ping(pCtx)
-	duration := time.Since(start)
+	err := h.pgPoolProv.Ping(pCtx)
 
-	now = time.Now().UnixNano()
-	h.lastCheckTime.Store(now)
-	h.lastCheckResult.Store(checkResult{err: err})
-	h.lastLatency.Store(int64(duration))
-
-	// Если ошибок нет, то переводим коннект в онлайн
-	if err == nil {
-		h.Online()
+	// Сохранение результатов
+	res := checkResult{
+		timestamp: start,
+		latency:   time.Since(start),
+		err:       err,
 	}
+	h.lastCheckResult.Store(res)
 
-	// Если произошла сетевая ошибка или мы не дождались Ping'а, то переводим коннект в Offline
-	if IsNetworkError(err) || errors.Is(err, context.DeadlineExceeded) {
-		h.Offline()
-	}
-
-	return err
+	return h.HandleDBError(err)
 }
 
-func (h *PgHndl) Latency() time.Duration {
-	return time.Duration(h.lastLatency.Load())
-}
-
-func (h *PgHndl) Begin(ctx context.Context, cb func(pgx.Tx) error) (err error) {
+func (h *PgHndl) Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) error) (err error) {
 	if !h.IsReady() {
 		if errPing := h.Ping(ctx); errPing != nil {
 			return fmt.Errorf("database connection is offline: %w", errPing)
 		}
 	}
 
-	tx, err := h.pgPool.Begin(ctx)
-	if err != nil {
-		if IsNetworkError(err) || errors.Is(err, context.DeadlineExceeded) {
-			h.Offline()
+	var tx pgx.Tx
+
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error(
+				"PANIC recovered",
+				slog.Any("r", r),
+				slog.Any("err", err),
+				slog.String("stack", string(debug.Stack())),
+			)
+			if err != nil {
+				err = fmt.Errorf("panic recovered: %w", err)
+			} else {
+				err = errors.New("panic recovered")
+			}
 		}
-		return err
+
+		if err != nil {
+			err = h.HandleDBError(err)
+			if tx != nil {
+				_ = tx.Rollback(context.WithoutCancel(ctx))
+			}
+		}
+	}()
+
+	tx, err = h.pgPoolProv.Begin(ctx)
+	if err != nil {
+		return // HandleDBError сработает в defer и обработает именованный err
+	}
+
+	// Вызов коллбека
+	if err = cb(ctx, tx); err != nil {
+		return // HandleDBError сработает в defer и обработает именованный err
+	}
+
+	err = tx.Commit(context.WithoutCancel(ctx))
+	if errors.Is(err, pgx.ErrTxClosed) {
+		err = nil // Считаем, что всё ок, транзакция уже завершена
+	}
+	return // HandleDBError сработает в defer и обработает именованный err
+}
+
+func (h *PgHndl) PgPool(ctx context.Context, cb func(ctx context.Context, pool *pgxpool.Pool) error) (err error) {
+	if !h.IsReady() {
+		if errPing := h.Ping(ctx); errPing != nil {
+			return fmt.Errorf("database connection is offline: %w", errPing)
+		}
 	}
 
 	defer func() {
@@ -184,36 +296,22 @@ func (h *PgHndl) Begin(ctx context.Context, cb func(pgx.Tx) error) (err error) {
 			slog.Error(
 				"PANIC recovered",
 				slog.Any("r", r),
+				slog.Any("err", err),
 				slog.String("stack", string(debug.Stack())),
 			)
-			if err == nil {
-				err = fmt.Errorf("panic recovered")
-			} else {
+			if err != nil {
 				err = fmt.Errorf("panic recovered: %w", err)
+			} else {
+				err = errors.New("panic recovered")
 			}
 		}
+		err = h.HandleDBError(err)
 	}()
 
-	defer tx.Rollback(context.WithoutCancel(ctx))
-
 	// Вызов коллбека
-	err = cb(tx)
-	if err != nil {
-		if IsNetworkError(err) {
-			h.Offline()
-		}
-		return err // Тут сработает defer tx.Rollback()
-	}
+	err = cb(ctx, h.pgPool)
 
-	err = tx.Commit(context.WithoutCancel(ctx))
-	if err != nil {
-		if IsNetworkError(err) {
-			h.Offline()
-		}
-		return err
-	}
-
-	return nil
+	return // HandleDBError сработает в defer и обработает именованный err
 }
 
 func IsNetworkError(err error) bool {

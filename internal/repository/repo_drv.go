@@ -1,34 +1,44 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	pgc "murl/internal/repository/pgc"
 	"sync"
+
+	"golang.org/x/sys/cpu"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type RepoDrvConfig interface {
 	RepoDrv() string
 	ShardSize() byte
 	DBDSN() string
+	EventStoragePath() string
 }
 
 type RepoDrv interface {
-	UpSert(shardID byte, str string) (uint64, error)
-	Select(shardID byte, idx uint64) (string, error)
-	Set(shardID byte, idx uint64, u string) error
+	UpSert(ctx context.Context, shardID byte, str string) (uint64, error)
+	Select(ctx context.Context, shardID byte, idx uint64) (string, error)
+	Set(ctx context.Context, shardID byte, idx uint64, u string) error
 }
 
-func NewRepoDrv(cfg RepoDrvConfig) RepoDrv {
+func NewRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 	switch cfg.RepoDrv() {
 	case "InMemory":
-		return newInMemoryRepoDrv(cfg)
+		return newInMemoryRepoDrv(cfg), nil
 	case "PgDB":
-		return newPgRepoDrv(cfg)
+		drv, err := newPgRepoDrv(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to init driver PgDB: %w", err)
+		}
+		return drv, nil
 	}
-	slog.Error("Unknow repo driver",
-		slog.String("RepoDrv", cfg.RepoDrv()),
-	)
-	panic("Unknow repo driver")
+
+	return nil, fmt.Errorf("unknown repo driver: %s", cfg.RepoDrv())
 }
 
 // =============================================
@@ -37,10 +47,11 @@ func NewRepoDrv(cfg RepoDrvConfig) RepoDrv {
 //
 // =============================================
 type inMemoryShard struct {
-	mu    sync.RWMutex
-	data  []string
-	index map[string]uint64 // Для O(1) поиска при UpSert
-	_     [8]byte           // Padding для защиты от False Sharing
+	mu      sync.RWMutex
+	data    map[uint64]string
+	index   map[string]uint64 // Для O(1) поиска при UpSert
+	lastIdx uint64
+	_       cpu.CacheLinePad
 }
 
 type InMemoryRepoDrv struct {
@@ -56,9 +67,8 @@ func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 
 	for i := 0; i < shardSize; i++ {
 		s.shards[i] = inMemoryShard{
-			mu:    sync.RWMutex{},
-			data:  make([]string, 0, 100),
-			index: make(map[string]uint64, 100),
+			data:  make(map[uint64]string, 1000),
+			index: make(map[string]uint64, 1000),
 		}
 	}
 
@@ -67,12 +77,8 @@ func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
-func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
+func (s *InMemoryRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
 	if int(shardID) >= len(s.shards) {
-		slog.Error("shard access out of bounds",
-			slog.Uint64("received", uint64(shardID)),
-			slog.Int("limit", len(s.shards)),
-		)
 		return 0, fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
@@ -90,58 +96,54 @@ func (s *InMemoryRepoDrv) UpSert(shardID byte, str string) (uint64, error) {
 		shard.mu.Unlock()
 		return idx, nil
 	}
-	idx := uint64(len(shard.data))
-	shard.data = append(shard.data, str)
+	idx := shard.lastIdx
+	shard.lastIdx++
+	shard.data[idx] = str
 	shard.index[str] = idx
 	shard.mu.Unlock()
 
 	return idx, nil
 }
 
-func (s *InMemoryRepoDrv) Set(shardID byte, idx uint64, u string) error {
+func (s *InMemoryRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u string) error {
 	if int(shardID) >= len(s.shards) {
-		slog.Error("shard access out of bounds",
-			slog.Uint64("received", uint64(shardID)),
-			slog.Int("limit", len(s.shards)),
-		)
 		return fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
 	shard := &s.shards[shardID]
 
 	shard.mu.Lock()
-	if idx == uint64(len(shard.data)) {
-		shard.data = append(shard.data, u)
-	} else if idx > uint64(len(shard.data)) {
-		newTail := make([]string, idx-uint64(len(shard.data))+1)
-		shard.data = append(shard.data, newTail...)
-		shard.data[idx] = u
-	} else {
-		shard.data[idx] = u
+	defer shard.mu.Unlock()
+
+	// Синхронно обновляем и данные и индекс
+	if val, ok := shard.data[idx]; ok {
+		delete(shard.index, val)
 	}
+
+	shard.data[idx] = u
 	shard.index[u] = idx
-	shard.mu.Unlock()
+	if idx >= shard.lastIdx {
+		shard.lastIdx = idx + 1
+	}
 
 	return nil
 }
 
 // По строке-идентификатору возвращает ранее записанную строку
-func (s *InMemoryRepoDrv) Select(shardID byte, idx uint64) (string, error) {
+func (s *InMemoryRepoDrv) Select(ctx context.Context, shardID byte, idx uint64) (string, error) {
 	if int(shardID) >= len(s.shards) {
 		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
 	shard := &s.shards[shardID]
 	shard.mu.RLock()
+	defer shard.mu.RUnlock()
 
-	if idx >= uint64(len(shard.data)) {
-		return "", fmt.Errorf("record not found: %d", idx)
+	if val, ok := shard.data[idx]; ok {
+		return val, nil
 	}
 
-	val := shard.data[idx]
-
-	shard.mu.RUnlock()
-	return val, nil
+	return "", fmt.Errorf("record not found: %d", idx)
 }
 
 // =============================================
@@ -149,8 +151,121 @@ func (s *InMemoryRepoDrv) Select(shardID byte, idx uint64) (string, error) {
 //	PgDrv
 //
 // =============================================
-// Заглушка. Драйвер будет разработан позже
-func newPgRepoDrv(cfg RepoDrvConfig) RepoDrv {
+
+//go:generate mockgen -source=$GOFILE -destination=repo_drv_mocks_test.go -package=$GOPACKAGE
+//go:generate mockgen -destination=pgx_mocks_test.go -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row
+
+// Чтобы протестировать драйвер постгреса, приходится городить интерфейс
+// DBHandler описывает методы pgc.PgHndl для мокирования в тестах
+type DBHandler interface {
+	Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) error) error
+	PgPool(ctx context.Context, cb func(ctx context.Context, p *pgxpool.Pool) error) error
+}
+
+type PgRepoDrv struct {
+	shards []DBHandler
+}
+
+func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 	slog.Info("Use PgDrv")
-	return newInMemoryRepoDrv(cfg)
+	shardSize := int(cfg.ShardSize())
+
+	r := &PgRepoDrv{
+		shards: make([]DBHandler, shardSize),
+	}
+
+	// В БД на текущий момент шардирования нет,
+	// но ожидается горизонтальное масштабирование.
+	// Поэтому в драйвере реализуем абстракцию шардирования, но на одной БД
+	pgHndl, err := pgc.NewPgHndl(ctx, "PgRepoDrv", cfg.DBDSN())
+	if err != nil {
+		return nil, fmt.Errorf("failed create PgRepoDrv: %w", err)
+	}
+
+	pgHndl.RunMigrations(ctx)
+
+	for i := 0; i < shardSize; i++ {
+		r.shards[i] = pgHndl
+	}
+
+	slog.Info("Use PgRepoDrv")
+
+	return r, nil
+}
+
+// Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
+func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
+	if int(shardID) >= len(s.shards) {
+		return 0, fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
+	}
+
+	shard := s.shards[shardID]
+
+	sql := `
+		INSERT INTO murl (url)
+		VALUES ($1)
+		ON CONFLICT (url)
+		DO UPDATE SET url = EXCLUDED.url
+		RETURNING id;
+	`
+	var id uint64
+	err := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, sql, str).Scan(&id)
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to execute query (%s): %w", sql, err)
+	}
+
+	return id, nil
+}
+
+func (s *PgRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u string) error {
+	if int(shardID) >= len(s.shards) {
+		return fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
+	}
+
+	shard := s.shards[shardID]
+
+	sql := `
+		INSERT INTO murl (id, url)
+		VALUES ($1, $2)
+		ON CONFLICT (id)
+		DO UPDATE SET url = EXCLUDED.url;
+	`
+	err := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, sql, idx, u)
+		return err
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to execute query (%s): %w", sql, err)
+	}
+
+	return nil
+}
+
+// По строке-идентификатору возвращает ранее записанную строку
+func (s *PgRepoDrv) Select(ctx context.Context, shardID byte, idx uint64) (string, error) {
+	if int(shardID) >= len(s.shards) {
+		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
+	}
+
+	shard := s.shards[shardID]
+
+	sql := `
+		SELECT url FROM murl
+		WHERE id = $1
+		LIMIT 1;
+	`
+	var u string
+	err := shard.PgPool(ctx, func(ctx context.Context, p *pgxpool.Pool) error {
+		return p.QueryRow(ctx, sql, idx).Scan(&u)
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to execute query (%s): %w", sql, err)
+	}
+
+	return u, nil
 }

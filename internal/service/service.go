@@ -9,14 +9,16 @@ import (
 	"net/url"
 )
 
+//go:generate mockgen -source=$GOFILE -destination=service_mocks_test.go -package=$GOPACKAGE
+
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
 	ShortBaseURL() config.ShortBaseURL
 }
 
 type MicroURLRepo interface {
-	Save(lURL string) (byte, uint64, error)
-	Load(sID byte, idx uint64) (string, error)
+	Save(ctx context.Context, lURL string) (byte, uint64, error)
+	Load(ctx context.Context, sID byte, idx uint64) (string, error)
 	Ping(ctx context.Context) error
 }
 
@@ -25,40 +27,41 @@ type Service struct {
 	repo         MicroURLRepo
 }
 
-func NewService(cfg ServiceConfig, repo MicroURLRepo) *Service {
+func NewService(ctx context.Context, cfg ServiceConfig, repo MicroURLRepo) *Service {
 	return &Service{
 		shortBaseURL: cfg.ShortBaseURL(),
 		repo:         repo,
 	}
 }
 
-func (s *Service) AddURL(longURL string) (string, error) {
+func (s *Service) AddURL(ctx context.Context, longURL string) (string, error) {
 	u, err := url.Parse(longURL)
 	if err != nil {
-		slog.Warn("invalid URL provided",
+		slog.Debug("invalid URL provided",
 			slog.String("long_url", longURL),
 			slog.Any("err", err),
 		)
 		return "", fmt.Errorf("invalid URL format: %w", err)
 	}
 	if !u.IsAbs() {
-		slog.Warn("longURL is not absolute",
+		slog.Info("longURL is not absolute",
 			slog.String("long_url", longURL),
 		)
-		return "", fmt.Errorf("URL is not absolute")
+		return "", fmt.Errorf("URL must be absolute (include scheme)")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		slog.Warn("invalid scheme",
+		slog.Info("invalid scheme",
 			slog.String("long_url", longURL),
 			slog.String("scheme", u.Scheme),
 		)
-		return "", fmt.Errorf("unsupported protocol scheme")
+		return "", fmt.Errorf("unsupported protocol scheme: %s", u.Scheme)
 	}
 
-	sID, idx, err := s.repo.Save(u.String())
+	normalizedURL := u.String()
+	sID, idx, err := s.repo.Save(ctx, normalizedURL)
 	if err != nil {
-		slog.Warn("longURL not saved",
-			slog.String("long_url", u.String()),
+		slog.Error("repo save failed",
+			slog.String("url", normalizedURL),
 			slog.Any("err", err),
 		)
 		return "", fmt.Errorf("failed to persist data: %w", err)
@@ -69,10 +72,8 @@ func (s *Service) AddURL(longURL string) (string, error) {
 		slog.Warn("cannot make shortURL",
 			slog.Uint64("sID", uint64(sID)),
 			slog.Uint64("idx", idx),
-			slog.String("long_url", longURL),
-			slog.Any("err", err),
 		)
-		return "", fmt.Errorf("failed to persist data: %w", err)
+		return "", fmt.Errorf("failed to generate short URL: %w", err)
 	}
 
 	slog.Info("URL shortened",
@@ -84,7 +85,7 @@ func (s *Service) AddURL(longURL string) (string, error) {
 	return sURL, nil
 }
 
-func (s *Service) GetURL(sURL string) (string, error) {
+func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
 	sID, idx, err := model.ParseShortURL(sURL)
 	if err != nil {
 		slog.Debug("bad format incoming shortURL",
@@ -94,7 +95,7 @@ func (s *Service) GetURL(sURL string) (string, error) {
 		return "", fmt.Errorf("invalid URL format: %w", err)
 	}
 
-	u, err := s.repo.Load(sID, idx)
+	u, err := s.repo.Load(ctx, sID, idx)
 	if err != nil {
 		slog.Error("failed to load URL from repo",
 			slog.Uint64("sID", uint64(sID)),
