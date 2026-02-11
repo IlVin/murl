@@ -115,9 +115,7 @@ func (s *InMemoryRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u s
 	}
 
 	if idx2, ok := shard.index[u]; ok {
-		if _, ok := shard.data[idx2]; ok {
-			delete(shard.data, idx2)
-		}
+		delete(shard.data, idx2)
 	}
 	shard.data[idx] = u
 	shard.index[u] = idx
