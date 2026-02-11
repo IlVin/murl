@@ -7,6 +7,7 @@ package service
 import (
 	context "context"
 	config "murl/internal/config"
+	event "murl/internal/model/event"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -72,6 +73,21 @@ func (m *MockMicroURLRepo) EXPECT() *MockMicroURLRepoMockRecorder {
 	return m.recorder
 }
 
+// Batch mocks base method.
+func (m *MockMicroURLRepo) Batch(ctx context.Context, e event.PayloadBatch) (event.PayloadBatch, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Batch", ctx, e)
+	ret0, _ := ret[0].(event.PayloadBatch)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Batch indicates an expected call of Batch.
+func (mr *MockMicroURLRepoMockRecorder) Batch(ctx, e interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Batch", reflect.TypeOf((*MockMicroURLRepo)(nil).Batch), ctx, e)
+}
+
 // Load mocks base method.
 func (m *MockMicroURLRepo) Load(ctx context.Context, sID byte, idx uint64) (string, error) {
 	m.ctrl.T.Helper()
@@ -99,6 +115,18 @@ func (m *MockMicroURLRepo) Ping(ctx context.Context) error {
 func (mr *MockMicroURLRepoMockRecorder) Ping(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockMicroURLRepo)(nil).Ping), ctx)
+}
+
+// PushEvent mocks base method.
+func (m *MockMicroURLRepo) PushEvent(ctx context.Context, e event.Event) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "PushEvent", ctx, e)
+}
+
+// PushEvent indicates an expected call of PushEvent.
+func (mr *MockMicroURLRepoMockRecorder) PushEvent(ctx, e interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushEvent", reflect.TypeOf((*MockMicroURLRepo)(nil).PushEvent), ctx, e)
 }
 
 // Save mocks base method.

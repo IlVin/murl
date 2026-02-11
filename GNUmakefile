@@ -64,6 +64,7 @@ clean:
 	rm -f $(BINARY_NAME)
 	rm -f $(COVER_FILE)
 	rm -f coverage.html
+	rm -f ./storage.json
 	@echo "Resetting test cache..."
 	go clean -testcache
 
@@ -110,4 +111,8 @@ iter10:
 
 iter11:
 	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration11$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'
+
+iter12:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration12$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'
+
 

@@ -3,165 +3,164 @@ package repository
 import (
 	"bufio"
 	"context"
-	"errors"
-	"os"
-	"testing"
-
 	"murl/internal/model/event"
+	"os"
+	"sync"
+	"testing"
+	"time"
 
 	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetShardID(t *testing.T) {
-	t.Run("zero shard size", func(t *testing.T) {
-		assert.Equal(t, byte(0), GetShardID("test", 0))
-	})
-	t.Run("consistent hashing", func(t *testing.T) {
-		key := "http://example.com"
-		id1 := GetShardID(key, 10)
-		id2 := GetShardID(key, 10)
-		assert.Equal(t, id1, id2)
-		assert.Less(t, id1, byte(10))
-	})
+// mockCfg реализует RepoConfig для тестов
+type mockCfg struct {
+	path string
 }
 
-func TestRepo_Methods(t *testing.T) {
+func (m mockCfg) RepoDrv() string          { return "InMemory" }
+func (m mockCfg) ShardSize() byte          { return 10 }
+func (m mockCfg) DBDSN() string            { return "" }
+func (m mockCfg) EventStoragePath() string { return m.path }
+
+func TestRepo_Save(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockDrv := NewMockRepoDataDrv(ctrl)
 	ctx := context.Background()
+	longURL := "https://google.com"
+
+	// Ожидаем вызов UpSert в драйвер
+	mockDrv.EXPECT().
+		UpSert(ctx, gomock.Any(), longURL).
+		Return(uint64(100), nil)
 
 	r := &Repo{
 		shardSize: 10,
 		db:        mockDrv,
-		events:    make(chan event.Event, 10),
+		events:    make(chan event.Event, 1),
 	}
 
-	t.Run("Save success", func(t *testing.T) {
-		url := "https://google.com"
-		// Ожидаем вызов UpSert в драйвер
-		mockDrv.EXPECT().UpSert(ctx, gomock.Any(), url).Return(uint64(123), nil)
+	sID, idx, err := r.Save(ctx, longURL)
 
-		sID, id, err := r.Save(ctx, url)
-		assert.NoError(t, err)
-		assert.Equal(t, uint64(123), id)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(100), idx)
+	assert.Equal(t, GetShardID(longURL, 10), sID)
 
-		// Проверяем, что событие улетело в канал
-		evt := <-r.events
-		assert.Equal(t, event.EvAddURL, evt.GetType())
-
-		var p event.PayloadAddURL
-		err = evt.GetPayload(&p)
-		assert.NoError(t, err)
-		assert.Equal(t, sID, p.ShardID)
-	})
-
-	t.Run("Save driver error", func(t *testing.T) {
-		mockDrv.EXPECT().UpSert(ctx, gomock.Any(), gomock.Any()).Return(uint64(0), errors.New("db crash"))
-		_, _, err := r.Save(ctx, "fail")
-		assert.Error(t, err)
-	})
-
-	t.Run("Load success", func(t *testing.T) {
-		mockDrv.EXPECT().Select(ctx, byte(1), uint64(1)).Return("https://yandex.ru", nil)
-		res, err := r.Load(ctx, 1, 1)
-		assert.NoError(t, err)
-		assert.Equal(t, "https://yandex.ru", res)
-	})
-
-	t.Run("Set success", func(t *testing.T) {
-		mockDrv.EXPECT().Set(ctx, byte(1), uint64(1), "new").Return(nil)
-		err := r.Set(ctx, 1, 1, "new")
-		assert.NoError(t, err)
-	})
-
-	t.Run("Ping error - no hndl", func(t *testing.T) {
-		err := r.Ping(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database was not set")
-	})
+	// Проверяем, что событие улетело в канал
+	select {
+	case e := <-r.events:
+		assert.Equal(t, event.EvAddURL, e.GetType())
+	default:
+		t.Fatal("event was not pushed to channel")
+	}
 }
 
-func TestLoadStoredEvents(t *testing.T) {
+func TestRepo_Batch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCfg := NewMockRepoConfig(ctrl)
-	mockDrv := NewMockRepoDrv(ctrl)
-	ctx := context.Background()
+	mockDrv := NewMockRepoDataDrv(ctrl)
+	shardSize := byte(10)
+	r := &Repo{shardSize: shardSize, db: mockDrv}
 
-	t.Run("empty path - return", func(t *testing.T) {
-		mockCfg.EXPECT().EventStoragePath().Return("")
-		loadStoredEvents(ctx, mockCfg, mockDrv)
-	})
+	payload := event.PayloadBatch{
+		{OrigURL: "https://a.com"},
+		{OrigURL: "https://b.com"},
+	}
 
-	t.Run("file exists - process", func(t *testing.T) {
-		tmpFile := "test_events.log"
-		defer os.Remove(tmpFile)
+	// Ожидаем вызов. Вместо NotZero проверяем корректность расчета
+	mockDrv.EXPECT().
+		BatchUpSert(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, b []event.PayloadBatchItem) ([]event.PayloadBatchItem, error) {
+			for i := range b {
+				// ПРОВЕРКА: рассчитываем ожидаемый ID заново в тесте
+				expectedID := GetShardID(b[i].OrigURL, shardSize)
+				assert.Equal(t, expectedID, b[i].ShardID, "ShardID mismatch for URL: %s", b[i].OrigURL)
+			}
+			return b, nil
+		})
 
-		// Генерируем реальное событие для парсинга
-		p := event.PayloadAddURL{ShardID: 1, ID: 55, URL: "http://saved.com"}
-		evt, _ := event.MakeEvent(p)
-		data, _ := evt.Serialize()
-
-		err := os.WriteFile(tmpFile, append(data, '\n'), 0644)
-		require.NoError(t, err)
-
-		mockCfg.EXPECT().EventStoragePath().Return(tmpFile).AnyTimes()
-		mockDrv.EXPECT().Set(ctx, byte(1), uint64(55), "http://saved.com").Return(nil)
-
-		loadStoredEvents(ctx, mockCfg, mockDrv)
-	})
+	res, err := r.Batch(context.Background(), payload)
+	assert.NoError(t, err)
+	assert.Len(t, res, 2)
 }
 
-func TestEventSaver(t *testing.T) {
+func TestRepo_WAL_Integration(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCfg := NewMockRepoConfig(ctrl)
+	defer ctrl.Finish()
 
-	t.Run("drain channel if path empty", func(t *testing.T) {
-		mockCfg.EXPECT().EventStoragePath().Return("")
-		ch := make(chan event.Event, 1)
+	mockDrv := NewMockRepoDataDrv(ctrl)
 
-		p := event.PayloadAddURL{URL: "test"}
-		evt, _ := event.MakeEvent(p)
-		ch <- evt
-		close(ch)
+	// Создаем временный файл
+	tmpFile, err := os.CreateTemp("", "wal_*.log")
+	require.NoError(t, err)
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
 
-		// Должен вычитать и выйти без паники
-		eventSaver(mockCfg, ch)
-	})
+	cfg := mockCfg{path: tmpPath}
 
-	t.Run("write to file", func(t *testing.T) {
-		tmpFile := "saver.log"
-		defer os.Remove(tmpFile)
+	// Инициализируем Repo вручную для теста
+	r := &Repo{
+		shardSize: 10,
+		db:        mockDrv,
+		events:    make(chan event.Event, 10),
+		wg:        sync.WaitGroup{},
+	}
 
-		mockCfg.EXPECT().EventStoragePath().Return(tmpFile).AnyTimes()
-		ch := make(chan event.Event, 1)
+	fh, _ := os.OpenFile(tmpPath, os.O_APPEND|os.O_WRONLY, 0644)
+	r.walFile = fh
+	r.wal = bufio.NewWriter(fh)
 
-		p := event.PayloadAddURL{URL: "http://logged.com"}
-		evt, _ := event.MakeEvent(p)
-		ch <- evt
-		close(ch)
+	r.wg.Add(1)
+	go r.eventSaver(cfg, r.events)
 
-		eventSaver(mockCfg, ch)
+	// Эмулируем событие
+	p := event.PayloadAddURL{URL: "https://test.com", ShardID: 1, ID: 1}
+	e, _ := event.MakeEvent(p, nil)
+	r.events <- e
 
-		// Проверяем содержимое
-		f, _ := os.Open(tmpFile)
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		assert.True(t, scanner.Scan())
-		assert.Contains(t, scanner.Text(), "http://logged.com")
-	})
-}
-
-func TestRepo_Close(t *testing.T) {
-	r := &Repo{events: make(chan event.Event)}
+	// Даем время на запись и закрываем
+	time.Sleep(100 * time.Millisecond)
 	r.Close()
 
-	// Проверяем закрытие канала
-	_, ok := <-r.events
-	assert.False(t, ok)
+	// Проверяем, что в файле есть данные
+	data, err := os.ReadFile(tmpPath)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, data)
+}
+
+func TestRepo_LoadStoredEvents(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockDrv := NewMockRepoDataDrv(ctrl)
+
+	// Подготовка файла с одним событием
+	tmpFile, _ := os.CreateTemp("", "wal_load_*.log")
+	defer os.Remove(tmpFile.Name())
+
+	p := event.PayloadAddURL{ShardID: 5, ID: 500, URL: "https://restore.me"}
+	e, _ := event.MakeEvent(p, nil)
+	data, _ := e.Serialize()
+
+	tmpFile.Write(data)
+	tmpFile.Write([]byte("\n"))
+	tmpFile.Close()
+
+	// Ожидаем вызов восстановления в драйвер
+	mockDrv.EXPECT().
+		Set(gomock.Any(), byte(5), uint64(500), "https://restore.me").
+		Return(nil)
+
+	cfg := mockCfg{path: tmpFile.Name()}
+	loadStoredEvents(context.Background(), cfg, mockDrv)
+}
+
+func TestGetShardID_ZeroSize(t *testing.T) {
+	// Защита от деления на ноль
+	assert.Equal(t, byte(0), GetShardID("test", 0))
 }

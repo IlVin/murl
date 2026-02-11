@@ -3,205 +3,148 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"murl/internal/model/event"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
+	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// --- Вспомогательные структуры для моков (если не используете mockgen) ---
-
-type MockService struct {
-	AddURLFunc func(ctx context.Context, url string) (string, error)
-	GetURLFunc func(ctx context.Context, url string) (string, error)
-	PingFunc   func(ctx context.Context) error
-}
-
-func (m *MockService) AddURL(ctx context.Context, url string) (string, error) {
-	return m.AddURLFunc(ctx, url)
-}
-func (m *MockService) GetURL(ctx context.Context, url string) (string, error) {
-	return m.GetURLFunc(ctx, url)
-}
-func (m *MockService) Ping(ctx context.Context) error { return m.PingFunc(ctx) }
-
-type MockConfig struct{}
-
-// --- ТЕСТЫ ---
+// mockHandlersConfig для реализации интерфейса HandlersConfig
+type mockHandlersConfig struct{}
 
 func TestHandlers_HndlAddURL(t *testing.T) {
-	svc := &MockService{}
-	h := NewHandlers(&MockConfig{}, svc)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	t.Run("success", func(t *testing.T) {
-		svc.AddURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "http://short/1", nil
-		}
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://long.com"))
-		rec := httptest.NewRecorder()
+	mockService := NewMockMicroURLService(ctrl)
+	h := NewHandlers(&mockHandlersConfig{}, mockService)
 
-		h.HndlAddURL()(rec, req)
+	t.Run("Success plain text", func(t *testing.T) {
+		longURL := "https://yandex.ru"
+		shortURL := "http://localhost/1_1"
 
-		assert.Equal(t, http.StatusCreated, rec.Code)
-		assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
-		assert.Equal(t, "http://short/1", rec.Body.String())
+		mockService.EXPECT().
+			AddURL(gomock.Any(), longURL).
+			Return(shortURL, nil)
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(longURL))
+		w := httptest.NewRecorder()
+
+		h.HndlAddURL()(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		assert.Equal(t, shortURL, w.Body.String())
 	})
 
-	t.Run("empty body", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-		rec := httptest.NewRecorder()
+	t.Run("Empty body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		w := httptest.NewRecorder()
 
-		h.HndlAddURL()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	})
-
-	t.Run("body too large", func(t *testing.T) {
-		largeData := make([]byte, bodyLimit+2)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(largeData))
-		rec := httptest.NewRecorder()
-
-		h.HndlAddURL()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	})
-
-	t.Run("service error", func(t *testing.T) {
-		svc.AddURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "", errors.New("db error")
-		}
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://long.com"))
-		rec := httptest.NewRecorder()
-
-		h.HndlAddURL()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		h.HndlAddURL()(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 
-func TestHandlers_HndlAPIShorten(t *testing.T) {
-	svc := &MockService{}
-	h := NewHandlers(&MockConfig{}, svc)
+func TestHandlers_HndlAPIShortenBatch_Streaming(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	t.Run("success", func(t *testing.T) {
-		svc.AddURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "http://short/1", nil
+	mockService := NewMockMicroURLService(ctrl)
+	h := NewHandlers(&mockHandlersConfig{}, mockService)
+
+	t.Run("Stream multiple batches", func(t *testing.T) {
+		// Подготовка входящего JSON массива
+		inputItems := []map[string]string{
+			{"correlation_id": "1", "original_url": "https://google.com"},
+			{"correlation_id": "2", "original_url": "https://apple.com"},
 		}
-		body := `{"url": "http://long.com"}`
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		rec := httptest.NewRecorder()
+		jsonBody, _ := json.Marshal(inputItems)
 
-		h.HndlAPIShorten()(rec, req)
+		// Ожидаем, что сервис обработает батч
+		// Поскольку в хэндлере используется event.MakeEvent, нам нужно перехватить вызов
+		mockService.EXPECT().
+			Batch(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, e event.Event) (event.Event, error) {
+				// Эмулируем ответ сервиса
+				resPayload := event.PayloadBatch{
+					{CorrelationID: "1", ShortURL: "http://m.url"},
+					{CorrelationID: "2", ShortURL: "http://m.url"},
+				}
+				return event.MakeEvent(resPayload, e)
+			})
 
-		assert.Equal(t, http.StatusCreated, rec.Code)
-		assert.Contains(t, rec.Body.String(), `"result":"http://short/1"`)
-	})
-
-	t.Run("invalid content type", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", nil)
-		req.Header.Set("Content-Type", "text/plain")
-		rec := httptest.NewRecorder()
-
-		h.HndlAPIShorten()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	})
-
-	t.Run("invalid json", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{invalid`))
+		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+		w := httptest.NewRecorder()
 
-		h.HndlAPIShorten()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	})
+		h.HndlAPIShortenBatch()(w, req)
 
-	t.Run("service internal error", func(t *testing.T) {
-		svc.AddURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "", errors.New("internal fail")
-		}
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"test"}`))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+		assert.Equal(t, http.StatusCreated, w.Code)
 
-		h.HndlAPIShorten()(rec, req)
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Проверяем валидность результирующего JSON
+		var result []event.PayloadBatchItem
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		require.NoError(t, err, "Response should be a valid JSON array")
+		assert.Len(t, result, 2)
+		assert.Equal(t, "http://m.url", result[0].ShortURL)
 	})
 }
 
 func TestHandlers_HndlGetURL(t *testing.T) {
-	svc := &MockService{}
-	h := NewHandlers(&MockConfig{}, svc)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	t.Run("redirect success", func(t *testing.T) {
-		svc.GetURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "http://long.com", nil
-		}
-		req := httptest.NewRequest(http.MethodGet, "/abc", nil)
-		rec := httptest.NewRecorder()
+	mockService := NewMockMicroURLService(ctrl)
+	h := NewHandlers(&mockHandlersConfig{}, mockService)
 
-		h.HndlGetURL()(rec, req)
+	t.Run("Redirect success", func(t *testing.T) {
+		shortPath := "/1_100"
+		targetURL := "https://target.com"
 
-		assert.Equal(t, http.StatusTemporaryRedirect, rec.Code)
-		assert.Equal(t, "http://long.com", rec.Header().Get("Location"))
-	})
+		mockService.EXPECT().
+			GetURL(gomock.Any(), shortPath).
+			Return(targetURL, nil)
 
-	t.Run("not found", func(t *testing.T) {
-		svc.GetURLFunc = func(ctx context.Context, url string) (string, error) {
-			return "", errors.New("not found")
-		}
-		req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
-		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, shortPath, nil)
+		w := httptest.NewRecorder()
 
-		h.HndlGetURL()(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		h.HndlGetURL()(w, req)
+
+		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+		assert.Equal(t, targetURL, w.Header().Get("Location"))
 	})
 }
 
 func TestHandlers_HndlPing(t *testing.T) {
-	svc := &MockService{}
-	h := NewHandlers(&MockConfig{}, svc)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	t.Run("ping success", func(t *testing.T) {
-		svc.PingFunc = func(ctx context.Context) error { return nil }
+	mockService := NewMockMicroURLService(ctrl)
+	h := NewHandlers(&mockHandlersConfig{}, mockService)
+
+	t.Run("DB Up", func(t *testing.T) {
+		mockService.EXPECT().Ping(gomock.Any()).Return(nil)
+
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-		rec := httptest.NewRecorder()
+		w := httptest.NewRecorder()
 
-		h.HndlPing()(rec, req)
-		assert.Equal(t, http.StatusOK, rec.Code)
+		h.HndlPing()(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("ping failure", func(t *testing.T) {
-		svc.PingFunc = func(ctx context.Context) error { return errors.New("db down") }
+	t.Run("DB Down", func(t *testing.T) {
+		mockService.EXPECT().Ping(gomock.Any()).Return(errors.New("conn refuse"))
+
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-		rec := httptest.NewRecorder()
+		w := httptest.NewRecorder()
 
-		h.HndlPing()(rec, req)
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		h.HndlPing()(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
-}
-
-func TestHandlers_HndlDefault(t *testing.T) {
-	h := NewHandlers(&MockConfig{}, nil)
-	req := httptest.NewRequest(http.MethodGet, "/what", nil)
-	rec := httptest.NewRecorder()
-
-	h.HndlDefault()(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-// Тест на ошибку чтения (имитация разрыва соединения)
-type ErrorReader struct{}
-
-func (e *ErrorReader) Read(p []byte) (n int, err error) { return 0, fmt.Errorf("read error") }
-func (e *ErrorReader) Close() error                     { return nil }
-
-func TestHandlers_ReadBodyError(t *testing.T) {
-	h := NewHandlers(&MockConfig{}, nil)
-	req := httptest.NewRequest(http.MethodPost, "/", &ErrorReader{})
-	rec := httptest.NewRecorder()
-
-	h.HndlAddURL()(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

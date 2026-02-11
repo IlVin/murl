@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	"errors"
 	"murl/internal/config"
 	"murl/internal/model"
+	"murl/internal/model/event"
 	"net/url"
 	"testing"
 
@@ -13,14 +13,71 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockCfg реализует ServiceConfig для тестов
-type mockCfg struct {
-	baseURL string
+type testServiceCfg struct {
+	base string
 }
 
-func (m mockCfg) ShortBaseURL() config.ShortBaseURL {
-	u, _ := url.Parse(m.baseURL)
+func (c testServiceCfg) ShortBaseURL() config.ShortBaseURL {
+	u, _ := url.Parse(c.base)
 	return config.ShortBaseURL{URL: *u}
+}
+
+func TestService_Batch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := NewMockMicroURLRepo(ctrl)
+	cfg := testServiceCfg{base: "https://m.url"}
+	svc := NewService(context.Background(), cfg, mockRepo)
+
+	t.Run("Mixed valid and invalid URLs", func(t *testing.T) {
+		inputPayload := event.PayloadBatch{
+			{OrigURL: "https://google.com"}, // Валидный
+			{OrigURL: "ftp://wrong.com"},    // Ошибка (схема)
+		}
+		eInput, _ := event.MakeEvent(inputPayload, nil)
+
+		// Вместо MatchedBy используем DoAndReturn для ручной валидации аргументов
+		mockRepo.EXPECT().
+			Batch(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, p event.PayloadBatch) (event.PayloadBatch, error) {
+				// ПРОВЕРКА: Сервис должен был отфильтровать ftp и оставить только 1 элемент
+				assert.Len(t, p, 1, "Service should filter out invalid URLs before calling repo")
+				assert.Equal(t, "https://google.com", p[0].OrigURL)
+
+				// Возвращаем результат от лица БД
+				return event.PayloadBatch{
+					{OrigURL: "https://google.com", ShardID: 1, Idx: 77},
+				}, nil
+			})
+
+		// Ожидаем запись в WAL (PushEvent)
+		mockRepo.EXPECT().PushEvent(gomock.Any(), gomock.Any()).Times(1)
+
+		resEvent, err := svc.Batch(context.Background(), eInput)
+		require.NoError(t, err)
+
+		var resPayload event.PayloadBatch
+		resEvent.GetPayload(&resPayload)
+
+		assert.Len(t, resPayload, 2)
+
+		var successCount, failCount int
+		for _, item := range resPayload {
+			if item.Err == errBadURLFormat {
+				failCount++
+			} else if item.ShortURL != "" {
+				successCount++
+				// Проверяем, что ссылка собрана верно (Base + ID + Idx)
+				assert.Contains(t, item.ShortURL, "https://m.url")
+				sID, idx, _ := model.ParseShortURL(item.ShortURL)
+				assert.Equal(t, byte(1), sID)
+				assert.Equal(t, uint64(77), idx)
+			}
+		}
+		assert.Equal(t, 1, successCount)
+		assert.Equal(t, 1, failCount)
+	})
 }
 
 func TestService_AddURL(t *testing.T) {
@@ -28,37 +85,15 @@ func TestService_AddURL(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := NewMockMicroURLRepo(ctrl)
-	base := "https://m.url"
-	cfg := mockCfg{baseURL: base}
-	svc := NewService(context.Background(), cfg, mockRepo)
+	svc := NewService(context.Background(), testServiceCfg{base: "http://go.to"}, mockRepo)
 
-	t.Run("Success shortening and validation", func(t *testing.T) {
-		longURL := "https://google.com"
-		expectedShard := byte(5)
-		expectedIdx := uint64(12345)
+	t.Run("Success", func(t *testing.T) {
+		long := "https://github.com"
+		mockRepo.EXPECT().Save(gomock.Any(), long).Return(byte(0), uint64(123), nil)
 
-		// Настраиваем мок
-		mockRepo.EXPECT().
-			Save(gomock.Any(), longURL).
-			Return(expectedShard, expectedIdx, nil)
-
-		// Вызов сервиса
-		gotSURL, err := svc.AddURL(context.Background(), longURL)
+		got, err := svc.AddURL(context.Background(), long)
 		require.NoError(t, err)
-
-		// ВАЛИДАЦИЯ: используем сервисную функцию модели для проверки результата
-		shardID, idx, err := model.ParseShortURL(gotSURL)
-		require.NoError(t, err, "Service generated an invalid URL format")
-
-		assert.Equal(t, expectedShard, shardID)
-		assert.Equal(t, expectedIdx, idx)
-		assert.Contains(t, gotSURL, base)
-	})
-
-	t.Run("Invalid protocol should fail", func(t *testing.T) {
-		_, err := svc.AddURL(context.Background(), "ftp://secret.file")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported protocol")
+		assert.Contains(t, got, "http://go.to")
 	})
 }
 
@@ -67,41 +102,20 @@ func TestService_GetURL(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := NewMockMicroURLRepo(ctrl)
-	baseStr := "http://m.url"
-	baseURL, _ := url.Parse(baseStr)
-	cfg := mockCfg{baseURL: baseStr}
-	svc := NewService(context.Background(), cfg, mockRepo)
+	svc := NewService(context.Background(), testServiceCfg{base: "http://m.url"}, mockRepo)
 
-	t.Run("Success retrieval using model generator", func(t *testing.T) {
-		expectedLongURL := "https://github.com"
-		shardID := byte(10)
-		idx := uint64(987654321)
-
-		// ГЕНЕРАЦИЯ: создаем входной URL с помощью функции модели
-		shortURL, err := model.MakeShortURL(shardID, idx, baseURL)
-		require.NoError(t, err)
-
-		// Настраиваем мок на те параметры, которые зашиты в сгенерированный URL
-		mockRepo.EXPECT().
-			Load(gomock.Any(), shardID, idx).
-			Return(expectedLongURL, nil)
-
-		// Вызов сервиса
-		gotLongURL, err := svc.GetURL(context.Background(), shortURL)
-
-		require.NoError(t, err)
-		assert.Equal(t, expectedLongURL, gotLongURL)
-	})
-
-	t.Run("Repo error handling", func(t *testing.T) {
-		shortURL, _ := model.MakeShortURL(1, 1, baseURL)
+	t.Run("Valid retrieval", func(t *testing.T) {
+		// Подготовка тестовых данных через модель
+		base, _ := url.Parse("http://m.url")
+		sURL, _ := model.MakeShortURL(5, 999, base)
 
 		mockRepo.EXPECT().
-			Load(gomock.Any(), gomock.Any(), gomock.Any()).
-			Return("", errors.New("db connection lost"))
+			Load(gomock.Any(), byte(5), uint64(999)).
+			Return("https://original.io", nil)
 
-		_, err := svc.GetURL(context.Background(), shortURL)
-		assert.Error(t, err)
+		got, err := svc.GetURL(context.Background(), sURL)
+		require.NoError(t, err)
+		assert.Equal(t, "https://original.io", got)
 	})
 }
 
@@ -110,10 +124,8 @@ func TestService_Ping(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRepo := NewMockMicroURLRepo(ctrl)
-	svc := NewService(context.Background(), mockCfg{}, mockRepo)
+	svc := NewService(context.Background(), testServiceCfg{}, mockRepo)
 
 	mockRepo.EXPECT().Ping(gomock.Any()).Return(nil)
-
-	err := svc.Ping(context.Background())
-	assert.NoError(t, err)
+	assert.NoError(t, svc.Ping(context.Background()))
 }

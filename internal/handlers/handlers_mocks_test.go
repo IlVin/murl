@@ -6,6 +6,7 @@ package handlers
 
 import (
 	context "context"
+	event "murl/internal/model/event"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -70,6 +71,21 @@ func (m *MockMicroURLService) AddURL(ctx context.Context, url string) (string, e
 func (mr *MockMicroURLServiceMockRecorder) AddURL(ctx, url interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddURL", reflect.TypeOf((*MockMicroURLService)(nil).AddURL), ctx, url)
+}
+
+// Batch mocks base method.
+func (m *MockMicroURLService) Batch(ctx context.Context, e event.Event) (event.Event, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Batch", ctx, e)
+	ret0, _ := ret[0].(event.Event)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Batch indicates an expected call of Batch.
+func (mr *MockMicroURLServiceMockRecorder) Batch(ctx, e interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Batch", reflect.TypeOf((*MockMicroURLService)(nil).Batch), ctx, e)
 }
 
 // GetURL mocks base method.

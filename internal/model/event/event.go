@@ -2,17 +2,25 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 
 	uuid "github.com/google/uuid"
 )
 
-type EvType uint32
+type EvType int32
 
+// !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
+//go:generate $GOPATH/bin/stringer -type=EvType
+
+// !!! [1] СЮДА ДОПИШИ НОВЫЙ ТИП КОНСТАНТЫ !!!
 // Возможные типы Event.
 const (
 	EvUnknown EvType = iota
 	EvAddURL
+	EvBatchItem
+	EvBatch
 	// Добавляем сюда новый тип
 	// и создаем к нему соответствующий тип Payload
 )
@@ -21,6 +29,7 @@ const (
 type Event interface {
 	GetID() uuid.UUID
 	GetType() EvType
+	GetParents() []uuid.UUID
 	Serialize() ([]byte, error)
 	GetPayload(dest any) error
 }
@@ -29,6 +38,8 @@ type Event interface {
 type Payload interface {
 	EventType() EvType
 }
+
+// !!! [3] СЮДА ДОБАВЬ НОВЫЙ ТИП ПОЛЕЗНОЙ НАГРУЗКИ СОБЫТИЯ !!!
 
 // ------------  EvAddURL  ------------
 type PayloadAddURL struct {
@@ -41,20 +52,40 @@ func (PayloadAddURL) EventType() EvType { return EvAddURL }
 
 //  ------------  /EvAddURL  ------------
 
-//  ------------  EvAddURL  ------------
+// ------------  EvBatch  ------------
+type PayloadBatch []PayloadBatchItem
+type PayloadBatchItem struct {
+	CorrelationID string `json:"correlation_id"`
+	OrigURL       string `json:"original_url,omitempty"`
+	ShortURL      string `json:"short_url,omitempty"`
+	ShardID       byte   `json:"-"`
+	Idx           uint64 `json:"-"`
+	Err           string `json:"err,omitempty"`
+}
+
+func (PayloadBatch) EventType() EvType     { return EvBatch }
+func (PayloadBatchItem) EventType() EvType { return EvBatchItem }
+
+//  ------------  /EvBatch  ------------
+
+//  ------------  EvNewType  ------------
 //  Здесь новый тип Event
-//  ------------  /EvAddURL  ------------
+//  ------------  /EvNewType  ------------
 
 // Конструктор Event из Payload
-func MakeEvent(payload Payload) (Event, error) {
+func MakeEvent(payload Payload, parentEvent Event) (Event, error) {
 	pData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("cannot serialize payload (%v): %w", payload, err)
 	}
-	e := &pvtEvent{
+	e := &baseEvent{
 		evID:      uuid.New(),
 		evType:    payload.EventType(),
 		evPayload: pData,
+	}
+
+	if parentEvent != nil {
+		e.evParentID = append(parentEvent.GetParents(), parentEvent.GetID())
 	}
 
 	return e, nil
@@ -69,46 +100,64 @@ func Parse(data []byte) (Event, error) {
 		return nil, fmt.Errorf("cannot deserialize: %w", err)
 	}
 
-	return &pvtEvent{
-		evID:      env.ID,
-		evType:    env.Type,
-		evPayload: env.Payload,
+	if env.ID == uuid.Nil {
+		return nil, errors.New("event ID is missing")
+	}
+
+	return &baseEvent{
+		evParentID: env.ParentID,
+		evID:       env.ID,
+		evType:     env.Type,
+		evPayload:  env.Payload,
 	}, nil
 }
 
-type pvtEvent struct {
-	evID      uuid.UUID
-	evType    EvType
-	evPayload json.RawMessage
+type baseEvent struct {
+	evParentID []uuid.UUID
+	evID       uuid.UUID
+	evType     EvType
+	evPayload  json.RawMessage
 }
 
-func (e *pvtEvent) GetID() uuid.UUID {
+func (e *baseEvent) GetID() uuid.UUID {
 	return e.evID
 }
 
-func (e *pvtEvent) GetType() EvType {
+func (e *baseEvent) GetType() EvType {
 	return e.evType
 }
 
-type serializeEnvelope struct {
-	ID      uuid.UUID       `json:"id"`
-	Type    EvType          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+func (e *baseEvent) GetParents() []uuid.UUID {
+	cp := make([]uuid.UUID, len(e.evParentID))
+	copy(cp, e.evParentID)
+	return cp
 }
 
-func (e *pvtEvent) Serialize() ([]byte, error) {
+type serializeEnvelope struct {
+	ParentID []uuid.UUID     `json:"parent_id,omitempty"`
+	ID       uuid.UUID       `json:"id"`
+	Type     EvType          `json:"type"`
+	Payload  json.RawMessage `json:"payload"`
+}
+
+func (e *baseEvent) Serialize() ([]byte, error) {
 	env := serializeEnvelope{
-		ID:      e.evID,
-		Type:    e.evType,
-		Payload: e.evPayload,
+		ParentID: e.evParentID,
+		ID:       e.evID,
+		Type:     e.evType,
+		Payload:  e.evPayload,
 	}
 	return json.Marshal(&env)
 }
 
-func (e *pvtEvent) GetPayload(dest any) error {
+func (e *baseEvent) GetPayload(dest any) error {
 	// Такого не может быть, но вдруг, как всегда?!...
 	if len(e.evPayload) == 0 {
 		return fmt.Errorf("payload is nil")
+	}
+	rv := reflect.ValueOf(dest)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return errors.New("dest must be a non-nil pointer")
 	}
 	if p, ok := dest.(Payload); ok {
 		if p.EventType() != e.evType {
