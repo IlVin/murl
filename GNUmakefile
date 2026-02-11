@@ -64,6 +64,7 @@ clean:
 	rm -f $(BINARY_NAME)
 	rm -f $(COVER_FILE)
 	rm -f coverage.html
+	rm -f ./storage.json
 	@echo "Resetting test cache..."
 	go clean -testcache
 

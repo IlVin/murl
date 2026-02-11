@@ -72,6 +72,7 @@ func NewRepo(ctx context.Context, cfg RepoConfig) *Repo {
 
 	r.wg.Add(1)
 	go r.eventSaver(cfg, r.events)
+	time.Sleep(1 * time.Second)
 
 	return r
 }
@@ -286,6 +287,15 @@ func (r *Repo) eventSaver(cfg RepoConfig, ch <-chan event.Event) {
 
 			if err = r.wal.WriteByte(0x0A); err != nil {
 				slog.Error("save event problem",
+					slog.Any("err", err),
+				)
+				continue
+			}
+
+			// Iter9 требует немедленного сохранения на диск
+			// Если нужна производительность, то здесь не Flush'им
+			if err := r.wal.Flush(); err != nil {
+				slog.Error("flush event problem",
 					slog.Any("err", err),
 				)
 				continue
