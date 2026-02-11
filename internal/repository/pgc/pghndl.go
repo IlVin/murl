@@ -37,6 +37,7 @@ import (
 // + Безопасное выполнение (Panic Recovery): Методы Tx (транзакция) и PgPool (прямой доступ) оборачивают вызовы пользовательских функций в recover().
 
 //go:generate mockgen -source=$GOFILE -destination=pghndl_mocks_test.go -package=$GOPACKAGE
+//go:generate mockgen -destination=pghndl_pgx_mocks_test.go -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row
 
 // Чтобы написать UNIT тесты вводим интерфейс.
 // pgPoolProvider описывает методы pgxpool.Pool, используемые модулем PgHndl
@@ -235,10 +236,10 @@ func (h *PgHndl) Ping(ctx context.Context) error {
 	return h.HandleDBError(err)
 }
 
-func (h *PgHndl) Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) error) (err error) {
+func (h *PgHndl) Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) (any, error)) (response any, err error) {
 	if !h.IsReady() {
 		if errPing := h.Ping(ctx); errPing != nil {
-			return fmt.Errorf("database connection is offline: %w", errPing)
+			return nil, fmt.Errorf("database connection is offline: %w", errPing)
 		}
 	}
 
@@ -273,7 +274,7 @@ func (h *PgHndl) Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx)
 	}
 
 	// Вызов коллбека
-	if err = cb(ctx, tx); err != nil {
+	if response, err = cb(ctx, tx); err != nil {
 		return // HandleDBError сработает в defer и обработает именованный err
 	}
 

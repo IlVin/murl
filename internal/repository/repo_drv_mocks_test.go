@@ -6,11 +6,10 @@ package repository
 
 import (
 	context "context"
+	event "murl/internal/model/event"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	pgx "github.com/jackc/pgx/v5"
-	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 )
 
 // MockRepoDrvConfig is a mock of RepoDrvConfig interface.
@@ -115,6 +114,35 @@ func (m *MockRepoDrv) EXPECT() *MockRepoDrvMockRecorder {
 	return m.recorder
 }
 
+// BatchUpSert mocks base method.
+func (m *MockRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchItem) ([]event.PayloadBatchItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BatchUpSert", ctx, batch)
+	ret0, _ := ret[0].([]event.PayloadBatchItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BatchUpSert indicates an expected call of BatchUpSert.
+func (mr *MockRepoDrvMockRecorder) BatchUpSert(ctx, batch interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BatchUpSert", reflect.TypeOf((*MockRepoDrv)(nil).BatchUpSert), ctx, batch)
+}
+
+// Ping mocks base method.
+func (m *MockRepoDrv) Ping(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Ping", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Ping indicates an expected call of Ping.
+func (mr *MockRepoDrvMockRecorder) Ping(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockRepoDrv)(nil).Ping), ctx)
+}
+
 // Select mocks base method.
 func (m *MockRepoDrv) Select(ctx context.Context, shardID byte, idx uint64) (string, error) {
 	m.ctrl.T.Helper()
@@ -157,55 +185,4 @@ func (m *MockRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uin
 func (mr *MockRepoDrvMockRecorder) UpSert(ctx, shardID, str interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpSert", reflect.TypeOf((*MockRepoDrv)(nil).UpSert), ctx, shardID, str)
-}
-
-// MockDBHandler is a mock of DBHandler interface.
-type MockDBHandler struct {
-	ctrl     *gomock.Controller
-	recorder *MockDBHandlerMockRecorder
-}
-
-// MockDBHandlerMockRecorder is the mock recorder for MockDBHandler.
-type MockDBHandlerMockRecorder struct {
-	mock *MockDBHandler
-}
-
-// NewMockDBHandler creates a new mock instance.
-func NewMockDBHandler(ctrl *gomock.Controller) *MockDBHandler {
-	mock := &MockDBHandler{ctrl: ctrl}
-	mock.recorder = &MockDBHandlerMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockDBHandler) EXPECT() *MockDBHandlerMockRecorder {
-	return m.recorder
-}
-
-// PgPool mocks base method.
-func (m *MockDBHandler) PgPool(ctx context.Context, cb func(context.Context, *pgxpool.Pool) error) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PgPool", ctx, cb)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// PgPool indicates an expected call of PgPool.
-func (mr *MockDBHandlerMockRecorder) PgPool(ctx, cb interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PgPool", reflect.TypeOf((*MockDBHandler)(nil).PgPool), ctx, cb)
-}
-
-// Tx mocks base method.
-func (m *MockDBHandler) Tx(ctx context.Context, cb func(context.Context, pgx.Tx) error) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Tx", ctx, cb)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Tx indicates an expected call of Tx.
-func (mr *MockDBHandlerMockRecorder) Tx(ctx, cb interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Tx", reflect.TypeOf((*MockDBHandler)(nil).Tx), ctx, cb)
 }

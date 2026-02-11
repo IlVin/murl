@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"murl/internal/model/event"
 	"net/http"
 	"strings"
+
+	"github.com/bcicen/jstream"
 )
 
 const bodyLimit = 1024 * 1024
@@ -22,6 +25,7 @@ type HandlersConfig interface {
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
 	AddURL(ctx context.Context, url string) (string, error)
+	Batch(ctx context.Context, e event.Event) (event.Event, error)
 	GetURL(ctx context.Context, url string) (string, error)
 	Ping(ctx context.Context) error
 }
@@ -160,6 +164,139 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 				slog.String("event", "network_error"),
 				slog.Any("err", err),
 			)
+		}
+	}
+}
+
+const partSize int = 1000
+
+func (h *Handlers) writePart(ctx context.Context, part event.PayloadBatch, w http.ResponseWriter, isFirst *bool) error {
+	// Создаем событие
+	e, err := event.MakeEvent(part, nil)
+	if err != nil {
+		return fmt.Errorf("internal error: %w", err)
+	}
+
+	// Просим сервис обработать событие
+	rEv, err := h.service.Batch(ctx, e)
+	if err != nil {
+		return fmt.Errorf("save to storage failed: %w", err)
+	}
+
+	// Вынимаем ответ из события
+	p := event.PayloadBatch{}
+	if err := rEv.GetPayload(&p); err != nil {
+		return fmt.Errorf("event unmarshaling failed: %w", err)
+	}
+
+	// Выводим результат
+	errs := []error{}
+	for i := range p {
+		b, err := json.Marshal(p[i])
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		if *isFirst {
+			if _, err := w.Write([]byte("\n")); err != nil {
+				return err
+			}
+			*isFirst = false
+		} else {
+			if _, err := w.Write([]byte(",\n")); err != nil {
+				return err
+			}
+		}
+
+		if _, err := w.Write(b); err != nil {
+			return err
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			slog.Warn("invalid Content-Type",
+				slog.String("Content-Type", ct),
+			)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		isFirst := true
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if _, err := w.Write([]byte("[")); err != nil {
+			slog.Error("internal error",
+				slog.Any("err", err),
+			)
+			return
+		}
+
+		part := make(event.PayloadBatch, 0, 1000)
+		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
+		for mv := range decoder.Stream() {
+			v, ok := mv.Value.(map[string]interface{})
+			if !ok {
+				slog.Error("Bad format of batch item",
+					slog.Any("batch_item", mv),
+				)
+				continue
+			}
+
+			// Формируем пайлоад
+			p := event.PayloadBatchItem{}
+			if cID, ok := v["correlation_id"]; !ok {
+				continue
+			} else if oURL, ok := v["original_url"]; !ok {
+				continue
+			} else if p.CorrelationID, ok = cID.(string); !ok {
+				continue
+			} else if p.OrigURL, ok = oURL.(string); !ok {
+				continue
+			}
+
+			// Добавляем пайлоад в батч пакет
+			part = append(part, p)
+
+			// Если набралось чуток
+			if len(part) >= partSize {
+				if err := h.writePart(r.Context(), part, w, &isFirst); err != nil {
+					slog.Error("internal error",
+						slog.Any("err", err),
+					)
+					return
+				}
+				// Опустошаем слайс
+				clear(part)
+				part = part[:0]
+			}
+		}
+		// Если осталось чуток
+		if len(part) > 0 {
+			if err := h.writePart(r.Context(), part, w, &isFirst); err != nil {
+				slog.Error("internal error",
+					slog.Any("err", err),
+				)
+				return
+			}
+			// Опустошаем слайс
+			clear(part)
+			part = part[:0]
+		}
+
+		if _, err := w.Write([]byte("]")); err != nil {
+			slog.Error("internal error",
+				slog.Any("err", err),
+			)
+			return
 		}
 	}
 }

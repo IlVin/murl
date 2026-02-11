@@ -31,6 +31,9 @@ func (m *mockHandlers) HndlGetURL() http.HandlerFunc {
 func (m *mockHandlers) HndlDefault() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
+func (m *mockHandlers) HndlAPIShortenBatch() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
+}
 
 // mockServeCfg для теста функции Serve
 type mockServeCfg struct {

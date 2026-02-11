@@ -6,6 +6,7 @@ package repository
 
 import (
 	context "context"
+	event "murl/internal/model/event"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -111,6 +112,35 @@ func NewMockRepoDataDrv(ctrl *gomock.Controller) *MockRepoDataDrv {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockRepoDataDrv) EXPECT() *MockRepoDataDrvMockRecorder {
 	return m.recorder
+}
+
+// BatchUpSert mocks base method.
+func (m *MockRepoDataDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchItem) ([]event.PayloadBatchItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BatchUpSert", ctx, batch)
+	ret0, _ := ret[0].([]event.PayloadBatchItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BatchUpSert indicates an expected call of BatchUpSert.
+func (mr *MockRepoDataDrvMockRecorder) BatchUpSert(ctx, batch interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BatchUpSert", reflect.TypeOf((*MockRepoDataDrv)(nil).BatchUpSert), ctx, batch)
+}
+
+// Ping mocks base method.
+func (m *MockRepoDataDrv) Ping(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Ping", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Ping indicates an expected call of Ping.
+func (mr *MockRepoDataDrvMockRecorder) Ping(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockRepoDataDrv)(nil).Ping), ctx)
 }
 
 // Select mocks base method.

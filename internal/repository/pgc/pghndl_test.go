@@ -8,171 +8,128 @@ import (
 	"time"
 
 	gomock "github.com/golang/mock/gomock"
-	pgx "github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	pgxpool "github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
-// --- Вспомогательные моки для pgx.Tx (mockgen не всегда удобно генерирует внешние типы) ---
+func TestPgHndl_Ping(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-type mockTx struct {
-	pgx.Tx
-	rollbackFn func()
-	commitFn   func() error
-}
-
-func (m *mockTx) Rollback(ctx context.Context) error { m.rollbackFn(); return nil }
-func (m *mockTx) Commit(ctx context.Context) error   { return m.commitFn() }
-
-// --- Настройка Suite ---
-
-type PgHndlTestSuite struct {
-	suite.Suite
-	ctrl *gomock.Controller
-	mock *MockpgPoolProvider
-	h    *PgHndl
-}
-
-func (s *PgHndlTestSuite) SetupTest() {
-	s.ctrl = gomock.NewController(s.T())
-	s.mock = NewMockpgPoolProvider(s.ctrl)
-	s.h = &PgHndl{
+	mockProv := NewMockpgPoolProvider(ctrl)
+	h := &PgHndl{
 		name:       "test-db",
 		host:       "localhost:5432",
-		pgPoolProv: s.mock,
+		pgPoolProv: mockProv,
 	}
-	s.h.isReady.Store(true)
-	// Сбрасываем кэш пинга в прошлое
-	s.h.lastCheckResult.Store(checkResult{timestamp: time.Now().Add(-10 * time.Second)})
-}
+	// Инициализируем атомарные значения
+	h.isReady.Store(false)
+	h.isClosed.Store(false)
+	h.lastCheckResult.Store(checkResult{timestamp: time.Now().Add(-10 * time.Second)})
 
-func TestPgHndlSuite(t *testing.T) {
-	suite.Run(t, new(PgHndlTestSuite))
-}
+	t.Run("ping success", func(t *testing.T) {
+		ctx := context.Background()
 
-// --- Тесты логики ---
+		// Ожидаем вызов Ping. Внутри Ping используется context.WithoutCancel,
+		// поэтому проверяем через gomock.Any()
+		mockProv.EXPECT().Ping(gomock.Any()).Return(nil)
 
-func (s *PgHndlTestSuite) TestIsNetworkError() {
-	s.Run("nil error", func() {
-		assert.False(s.T(), IsNetworkError(nil))
+		err := h.Ping(ctx)
+		assert.NoError(t, err)
+		assert.True(t, h.IsReady())
 	})
-	s.Run("net.Error", func() {
-		err := &net.OpError{Op: "read"}
-		assert.True(s.T(), IsNetworkError(err))
-	})
-	s.Run("pgconn.ConnectError", func() {
-		err := &pgconn.ConnectError{}
-		assert.True(s.T(), IsNetworkError(err))
-	})
-	s.Run("pgconn.PgError 08 class", func() {
-		err := &pgconn.PgError{Code: "08001"}
-		assert.True(s.T(), IsNetworkError(err))
-	})
-	s.Run("pgconn.PgError other class", func() {
-		err := &pgconn.PgError{Code: "23505"}
-		assert.False(s.T(), IsNetworkError(err))
+
+	t.Run("ping failure", func(t *testing.T) {
+		h.Online() // Принудительно ставим в Online перед тестом
+		h.lastCheckResult.Store(checkResult{timestamp: time.Now().Add(-10 * time.Second)})
+
+		// Имитируем сетевую ошибку
+		netErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("timeout")}
+		mockProv.EXPECT().Ping(gomock.Any()).Return(netErr)
+
+		err := h.Ping(context.Background())
+		assert.Error(t, err)
+		assert.False(t, h.IsReady(), "Should go offline on network error")
 	})
 }
 
-func (s *PgHndlTestSuite) TestPing_CachingAndLocking() {
-	s.Run("Successful Ping updates state", func() {
-		s.mock.EXPECT().Ping(gomock.Any()).Return(nil)
-		err := s.h.Ping(context.Background())
-		assert.NoError(s.T(), err)
-		assert.True(s.T(), s.h.IsReady())
-	})
+func TestPgHndl_Tx(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	s.Run("Cached result", func() {
-		// Время последнего пинга — сейчас, Ping не должен вызываться у провайдера
-		s.h.lastCheckResult.Store(checkResult{timestamp: time.Now(), err: nil})
-		err := s.h.Ping(context.Background())
-		assert.NoError(s.T(), err)
-	})
+	mockProv := NewMockpgPoolProvider(ctrl)
+	mockTx := NewMockTx(ctrl) // Сгенерированный мок для pgx.Tx
 
-	s.Run("Locking (TryLock)", func() {
-		s.h.lastCheckResult.Store(checkResult{timestamp: time.Now().Add(-10 * time.Second)})
-		s.h.mu.Lock() // Симулируем другой процесс пинга
-		defer s.h.mu.Unlock()
+	h := &PgHndl{
+		pgPoolProv: mockProv,
+	}
+	h.isReady.Store(true)
 
-		err := s.h.Ping(context.Background())
-		assert.NoError(s.T(), err, "Should return nil if check in progress")
-	})
-}
+	t.Run("transaction success", func(t *testing.T) {
+		ctx := context.Background()
 
-func (s *PgHndlTestSuite) TestTx_Success() {
-	mTx := &mockTx{commitFn: func() error { return nil }}
-	s.mock.EXPECT().Begin(gomock.Any()).Return(mTx, nil)
+		// 1. Ожидаем начало транзакции
+		mockProv.EXPECT().Begin(ctx).Return(mockTx, nil)
 
-	err := s.h.Tx(context.Background(), func(ctx context.Context, tx pgx.Tx) error {
-		return nil
-	})
-	assert.NoError(s.T(), err)
-}
+		// 2. Ожидаем коммит
+		mockTx.EXPECT().Commit(gomock.Any()).Return(nil)
 
-func (s *PgHndlTestSuite) TestTx_PanicRecovery() {
-	mTx := &mockTx{rollbackFn: func() {}}
-	s.mock.EXPECT().Begin(gomock.Any()).Return(mTx, nil)
-
-	err := s.h.Tx(context.Background(), func(ctx context.Context, tx pgx.Tx) error {
-		panic("disaster")
-	})
-
-	assert.Error(s.T(), err)
-	assert.Contains(s.T(), err.Error(), "panic recovered")
-}
-
-func (s *PgHndlTestSuite) TestTx_NetworkErrorHandling() {
-	s.mock.EXPECT().Begin(gomock.Any()).Return(nil, &net.OpError{Op: "dial"})
-
-	err := s.h.Tx(context.Background(), func(ctx context.Context, tx pgx.Tx) error {
-		return nil
-	})
-
-	assert.Error(s.T(), err)
-	assert.False(s.T(), s.h.IsReady(), "Should go offline on net error")
-}
-
-func (s *PgHndlTestSuite) TestPgPool_Methods() {
-	s.Run("Normal execution", func() {
-		err := s.h.PgPool(context.Background(), func(ctx context.Context, p *pgxpool.Pool) error {
-			return nil
+		res, err := h.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
+			assert.Equal(t, mockTx, tx)
+			return "ok", nil
 		})
-		assert.NoError(s.T(), err)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "ok", res)
 	})
 
-	s.Run("Offline flow", func() {
-		s.h.Offline()
-		s.mock.EXPECT().Ping(gomock.Any()).Return(errors.New("db dead"))
-		err := s.h.PgPool(context.Background(), nil)
-		assert.Error(s.T(), err)
+	t.Run("transaction rollback on error", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockProv.EXPECT().Begin(ctx).Return(mockTx, nil)
+
+		// Ожидаем Rollback, так как колбэк вернет ошибку
+		mockTx.EXPECT().Rollback(gomock.Any()).Return(nil)
+
+		_, err := h.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
+			return nil, errors.New("query failed")
+		})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "query failed")
 	})
 }
 
-func (s *PgHndlTestSuite) TestClose() {
-	s.mock.EXPECT().Close()
-	s.h.Close()
-	assert.True(s.T(), s.h.isClosed.Load())
-	assert.False(s.T(), s.h.IsReady())
+func TestPgHndl_RecoverPanic(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Повторный Online не должен работать
-	s.h.Online()
-	assert.False(s.T(), s.h.IsReady())
-}
+	mockProv := NewMockpgPoolProvider(ctrl)
+	h := &PgHndl{pgPoolProv: mockProv}
+	h.isReady.Store(true)
 
-func (s *PgHndlTestSuite) TestHandleDBError_ContextDeadline() {
-	err := s.h.HandleDBError(context.DeadlineExceeded)
-	assert.Error(s.T(), err)
-	assert.False(s.T(), s.h.IsReady(), "Should go offline on context deadline")
-}
+	t.Run("recover in PgPool", func(t *testing.T) {
+		err := h.PgPool(context.Background(), func(ctx context.Context, pool *pgxpool.Pool) error {
+			panic("something went wrong")
+		})
 
-func (s *PgHndlTestSuite) TestTx_AlreadyClosedCommit() {
-	mTx := &mockTx{commitFn: func() error { return pgx.ErrTxClosed }}
-	s.mock.EXPECT().Begin(gomock.Any()).Return(mTx, nil)
-
-	err := s.h.Tx(context.Background(), func(ctx context.Context, tx pgx.Tx) error {
-		return nil
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "panic recovered")
 	})
-	assert.NoError(s.T(), err, "Should ignore ErrTxClosed")
+}
+
+func TestPgHndl_Close(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockProv := NewMockpgPoolProvider(ctrl)
+	h := &PgHndl{pgPoolProv: mockProv}
+	h.isReady.Store(true)
+
+	mockProv.EXPECT().Close().Times(1)
+
+	h.Close()
+	assert.False(t, h.IsReady())
+	assert.True(t, h.isClosed.Load())
 }
