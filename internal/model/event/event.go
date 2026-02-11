@@ -9,7 +9,7 @@ import (
 	uuid "github.com/google/uuid"
 )
 
-type EvType uint32
+type EvType int32
 
 // !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
 //go:generate $GOPATH/bin/stringer -type=EvType
