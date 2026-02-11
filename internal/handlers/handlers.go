@@ -287,9 +287,6 @@ func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
 				)
 				return
 			}
-			// Опустошаем слайс
-			clear(part)
-			part = part[:0]
 		}
 
 		if _, err := w.Write([]byte("]")); err != nil {
