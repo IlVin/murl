@@ -36,6 +36,20 @@ func (m *MockDBHandler) EXPECT() *MockDBHandlerMockRecorder {
 	return m.recorder
 }
 
+// Instance mocks base method.
+func (m *MockDBHandler) Instance() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Instance")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// Instance indicates an expected call of Instance.
+func (mr *MockDBHandlerMockRecorder) Instance() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Instance", reflect.TypeOf((*MockDBHandler)(nil).Instance))
+}
+
 // PgPool mocks base method.
 func (m *MockDBHandler) PgPool(ctx context.Context, cb func(context.Context, *pgxpool.Pool) error) error {
 	m.ctrl.T.Helper()
@@ -62,6 +76,20 @@ func (m *MockDBHandler) Ping(ctx context.Context) error {
 func (mr *MockDBHandlerMockRecorder) Ping(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockDBHandler)(nil).Ping), ctx)
+}
+
+// RunMigrations mocks base method.
+func (m *MockDBHandler) RunMigrations(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RunMigrations", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RunMigrations indicates an expected call of RunMigrations.
+func (mr *MockDBHandlerMockRecorder) RunMigrations(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RunMigrations", reflect.TypeOf((*MockDBHandler)(nil).RunMigrations), arg0)
 }
 
 // Tx mocks base method.

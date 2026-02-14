@@ -14,11 +14,15 @@ import (
 )
 
 const sqlUpSert string = `
-	INSERT INTO murl (url)
-	VALUES ($1)
-	ON CONFLICT (url)
-	DO UPDATE SET url = EXCLUDED.url
-	RETURNING id;
+WITH ins AS (
+    INSERT INTO murl (url) VALUES ($1)
+    ON CONFLICT (url) DO NOTHING
+    RETURNING id
+)
+SELECT id, 0 AS conflict FROM ins
+UNION ALL
+SELECT id, 1 AS conflict FROM murl WHERE url = $1
+LIMIT 1;
 `
 
 const sqlSet string = `
@@ -47,6 +51,8 @@ type DBHandler interface {
 	Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) (any, error)) (any, error)
 	PgPool(ctx context.Context, cb func(ctx context.Context, p *pgxpool.Pool) error) error
 	Ping(ctx context.Context) error
+	Instance() string
+	RunMigrations(context.Context) error
 }
 
 type PgRepoDrv struct {
@@ -69,8 +75,6 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 		return nil, fmt.Errorf("failed create PgRepoDrv: %w", err)
 	}
 
-	pgHndl.RunMigrations(ctx)
-
 	for i := 0; i < shardSize; i++ {
 		r.shards[i] = pgHndl
 	}
@@ -78,6 +82,30 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 	slog.Info("Use PgRepoDrv")
 
 	return r, nil
+}
+
+func (s *PgRepoDrv) RunMigrations(ctx context.Context) error {
+	// Собираем уникальные инстансы
+	instances := make(map[string]DBHandler)
+	for i, shard := range s.shards {
+		instances[shard.Instance()] = s.shards[i]
+	}
+
+	// На каждом инстансе запускаем миграцию
+	errs := make([]error, 0, 10)
+	for instance, shard := range instances {
+		select {
+		case <-ctx.Done():
+			errs = append(errs, errors.New("migration interrupted"))
+			return errors.Join(errs...)
+		default:
+			slog.Info("Run migration",
+				slog.String("instance", instance),
+			)
+			errs = append(errs, shard.RunMigrations(ctx))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *PgRepoDrv) getShard(shardID byte) (DBHandler, error) {
@@ -88,6 +116,11 @@ func (s *PgRepoDrv) getShard(shardID byte) (DBHandler, error) {
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
+type upsertResult struct {
+	ID uint64
+	CF int
+}
+
 func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
 	shard, err := s.getShard(shardID)
 	if err != nil {
@@ -96,19 +129,24 @@ func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint6
 
 	res, err := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
 		var id uint64
-		err := tx.QueryRow(ctx, sqlUpSert, str).Scan(&id)
-		return id, err
+		var cf int
+		err := tx.QueryRow(ctx, sqlUpSert, str).Scan(&id, &cf)
+		return upsertResult{ID: id, CF: cf}, err
 	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, err)
 	}
 
-	val, ok := res.(uint64)
+	val, ok := res.(upsertResult)
 	if !ok {
 		return 0, errors.New("unexpected return type")
 	}
 
-	return val, nil
+	if val.CF != 0 {
+		return val.ID, ErrRecordAlreadyExists
+	}
+
+	return val.ID, nil
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
@@ -131,22 +169,26 @@ func (s *PgRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchI
 
 	// Запускаем горутины
 	for sID, items := range byShard {
-		sID, items := sID, items // shadowing для горутины
-		shard := s.shards[sID]
-
 		wg.Add(1)
-		go func() {
+		go func(items []int, shard DBHandler) {
 			defer wg.Done()
 			_, batchErr := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
+				b := &pgx.Batch{}
+				for _, i := range items {
+					b.Queue(sqlUpSert, batch[i].OrigURL)
+				}
+				br := tx.SendBatch(ctx, b)
+				defer br.Close()
+
 				for _, i := range items {
 					var idx uint64
-					err := tx.QueryRow(ctx, sqlUpSert, batch[i].OrigURL).Scan(&idx)
-					if err != nil {
-						// Настоящая ошибка
+					var cf int
+					if err := br.QueryRow().Scan(&idx, &cf); err != nil {
 						return nil, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, err)
 					}
 					batch[i].Idx = idx
 				}
+
 				return nil, nil
 			})
 
@@ -155,13 +197,13 @@ func (s *PgRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchI
 					slog.Int("ShardID", int(sID)),
 					slog.Any("err", batchErr),
 				)
-				// ОЧЕНЬ ВАЖНО: Транзакция откатилась, помечаем ошибки в слайсе
+				// Транзакция откатилась, помечаем ошибки в слайсе
 				for _, i := range items {
 					batch[i].Idx = 0
 					batch[i].Err = errInternalServerError
 				}
 			}
-		}()
+		}(items, s.shards[sID])
 	}
 	wg.Wait()
 

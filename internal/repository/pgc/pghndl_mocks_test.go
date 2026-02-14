@@ -10,6 +10,7 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 	pgx "github.com/jackc/pgx/v5"
+	pgconn "github.com/jackc/pgx/v5/pgconn"
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -89,4 +90,143 @@ func (m *MockpgPoolProvider) Ping(arg0 context.Context) error {
 func (mr *MockpgPoolProviderMockRecorder) Ping(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockpgPoolProvider)(nil).Ping), arg0)
+}
+
+// MockPgPool is a mock of PgPool interface.
+type MockPgPool struct {
+	ctrl     *gomock.Controller
+	recorder *MockPgPoolMockRecorder
+}
+
+// MockPgPoolMockRecorder is the mock recorder for MockPgPool.
+type MockPgPoolMockRecorder struct {
+	mock *MockPgPool
+}
+
+// NewMockPgPool creates a new mock instance.
+func NewMockPgPool(ctrl *gomock.Controller) *MockPgPool {
+	mock := &MockPgPool{ctrl: ctrl}
+	mock.recorder = &MockPgPoolMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPgPool) EXPECT() *MockPgPoolMockRecorder {
+	return m.recorder
+}
+
+// CopyFrom mocks base method.
+func (m *MockPgPool) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CopyFrom", ctx, tableName, columnNames, rowSrc)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CopyFrom indicates an expected call of CopyFrom.
+func (mr *MockPgPoolMockRecorder) CopyFrom(ctx, tableName, columnNames, rowSrc interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CopyFrom", reflect.TypeOf((*MockPgPool)(nil).CopyFrom), ctx, tableName, columnNames, rowSrc)
+}
+
+// Exec mocks base method.
+func (m *MockPgPool) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, sql}
+	for _, a := range arguments {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Exec", varargs...)
+	ret0, _ := ret[0].(pgconn.CommandTag)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exec indicates an expected call of Exec.
+func (mr *MockPgPoolMockRecorder) Exec(ctx, sql interface{}, arguments ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, sql}, arguments...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockPgPool)(nil).Exec), varargs...)
+}
+
+// Ping mocks base method.
+func (m *MockPgPool) Ping(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Ping", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Ping indicates an expected call of Ping.
+func (mr *MockPgPoolMockRecorder) Ping(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockPgPool)(nil).Ping), ctx)
+}
+
+// Query mocks base method.
+func (m *MockPgPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, sql}
+	for _, a := range args {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Query", varargs...)
+	ret0, _ := ret[0].(pgx.Rows)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Query indicates an expected call of Query.
+func (mr *MockPgPoolMockRecorder) Query(ctx, sql interface{}, args ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, sql}, args...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Query", reflect.TypeOf((*MockPgPool)(nil).Query), varargs...)
+}
+
+// QueryRow mocks base method.
+func (m *MockPgPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, sql}
+	for _, a := range args {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "QueryRow", varargs...)
+	ret0, _ := ret[0].(pgx.Row)
+	return ret0
+}
+
+// QueryRow indicates an expected call of QueryRow.
+func (mr *MockPgPoolMockRecorder) QueryRow(ctx, sql interface{}, args ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, sql}, args...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QueryRow", reflect.TypeOf((*MockPgPool)(nil).QueryRow), varargs...)
+}
+
+// SendBatch mocks base method.
+func (m *MockPgPool) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SendBatch", ctx, b)
+	ret0, _ := ret[0].(pgx.BatchResults)
+	return ret0
+}
+
+// SendBatch indicates an expected call of SendBatch.
+func (mr *MockPgPoolMockRecorder) SendBatch(ctx, b interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendBatch", reflect.TypeOf((*MockPgPool)(nil).SendBatch), ctx, b)
+}
+
+// Stat mocks base method.
+func (m *MockPgPool) Stat() *pgxpool.Stat {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Stat")
+	ret0, _ := ret[0].(*pgxpool.Stat)
+	return ret0
+}
+
+// Stat indicates an expected call of Stat.
+func (mr *MockPgPoolMockRecorder) Stat() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stat", reflect.TypeOf((*MockPgPool)(nil).Stat))
 }
