@@ -237,13 +237,11 @@ func (s *PgRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchI
 
 	result := make([]event.PayloadBatchItem, 0, len(batch))
 	for range len(batch) {
-		select {
-		case res, ok := <-resCh:
-			if !ok {
-				return result, nil
-			}
-			result = append(result, res)
+		res, ok := <-resCh
+		if !ok {
+			return result, nil
 		}
+		result = append(result, res)
 	}
 	return result, nil
 }

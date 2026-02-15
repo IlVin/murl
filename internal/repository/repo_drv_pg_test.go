@@ -38,9 +38,9 @@ func TestPgRepoDrv_UpSert(t *testing.T) {
 			Scan(gomock.Any(), gomock.Any()).
 			Do(func(dest ...any) {
 				// dest[0] — это *uint64 (id)
-				// dest[1] — это *int (cf)
+				// dest[1] — это *bool (cf)
 				*dest[0].(*uint64) = 1
-				*dest[1].(*int) = 0
+				*dest[1].(*bool) = false
 			}).
 			Return(nil)
 
