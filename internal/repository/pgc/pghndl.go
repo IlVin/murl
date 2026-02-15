@@ -21,8 +21,8 @@ import (
 	goose "github.com/pressly/goose/v3"
 )
 
-//go:generate mockgen -source=$GOFILE -destination=pghndl_mocks_test.go -package=$GOPACKAGE
-//go:generate mockgen -destination=pghndl_pgx_mocks_test.go -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row
+//go:generate mockgen -source=$GOFILE -destination=pghndl_mocks_test.go -package=$GOPACKAGE . PgPool
+//go:generate mockgen -destination=pghndl_pgx_mocks_test.go -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
 
 // Чтобы написать UNIT тесты вводим интерфейс.
 // pgPoolProvider описывает методы pgxpool.Pool, используемые модулем PgHndl
@@ -71,10 +71,10 @@ func NewPgHndl(ctx context.Context, name string, connString string) (*PgHndl, er
 	connCfg := pool.Config().ConnConfig
 
 	h := &PgHndl{
-		name:       name,
+		name:       connCfg.Database,
 		pgPoolProv: pool,
 		pgPool:     pool,
-		instance:   fmt.Sprintf("%s:%d/%s", connCfg.Host, connCfg.Port, connCfg.Database),
+		instance:   fmt.Sprintf("%s:%d", connCfg.Host, connCfg.Port),
 
 		failures: NewFailureCounter(3, 2*time.Second), // подряд 3 ошибки за 2 секунды и надо перевести PgHndl в Offline
 		repeater: NewPgBackoff(3, 3*time.Second),      // 3 запроса к БД в течение 3 сек
@@ -151,7 +151,7 @@ func (h *PgHndl) Offline() {
 }
 
 // Close перевод хэндла в IsClosed && !IsReady режим
-func (h *PgHndl) Close() {
+func (h *PgHndl) Close() error {
 	if h.isClosed.CompareAndSwap(false, true) {
 		h.pgPoolProv.Close()
 		slog.Info("The PgHndl closed",
@@ -160,6 +160,7 @@ func (h *PgHndl) Close() {
 		)
 		h.Offline()
 	}
+	return nil
 }
 
 func (h *PgHndl) HandleError(err error) error {

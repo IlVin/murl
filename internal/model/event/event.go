@@ -43,9 +43,10 @@ type Payload interface {
 
 // ------------  EvAddURL  ------------
 type PayloadAddURL struct {
-	ShardID byte   `json:"shard_id"`
-	ID      uint64 `json:"id"`
-	URL     string `json:"url"`
+	ShardID      byte   `json:"shard_id"`
+	ID           uint64 `json:"id"`
+	URL          string `json:"url"`
+	ConflictFlag bool   `json:"-"`
 }
 
 func (PayloadAddURL) EventType() EvType { return EvAddURL }
@@ -60,6 +61,7 @@ type PayloadBatchItem struct {
 	ShortURL      string `json:"short_url,omitempty"`
 	ShardID       byte   `json:"-"`
 	Idx           uint64 `json:"-"`
+	ConflictFlag  bool   `json:"-"`
 	Err           string `json:"err,omitempty"`
 }
 

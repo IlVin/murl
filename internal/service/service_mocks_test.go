@@ -130,13 +130,14 @@ func (mr *MockMicroURLRepoMockRecorder) PushEvent(ctx, e interface{}) *gomock.Ca
 }
 
 // Save mocks base method.
-func (m *MockMicroURLRepo) Save(ctx context.Context, lURL string) (byte, uint64, error) {
+func (m *MockMicroURLRepo) Save(ctx context.Context, lURL string) (byte, uint64, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Save", ctx, lURL)
 	ret0, _ := ret[0].(byte)
 	ret1, _ := ret[1].(uint64)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret2, _ := ret[2].(bool)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
 }
 
 // Save indicates an expected call of Save.

@@ -6,11 +6,11 @@ package repository
 
 import (
 	context "context"
+	pgc "murl/internal/repository/pgc"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
 	pgx "github.com/jackc/pgx/v5"
-	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 )
 
 // MockDBHandler is a mock of DBHandler interface.
@@ -36,6 +36,20 @@ func (m *MockDBHandler) EXPECT() *MockDBHandlerMockRecorder {
 	return m.recorder
 }
 
+// Close mocks base method.
+func (m *MockDBHandler) Close() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Close")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Close indicates an expected call of Close.
+func (mr *MockDBHandlerMockRecorder) Close() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockDBHandler)(nil).Close))
+}
+
 // Instance mocks base method.
 func (m *MockDBHandler) Instance() string {
 	m.ctrl.T.Helper()
@@ -50,8 +64,22 @@ func (mr *MockDBHandlerMockRecorder) Instance() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Instance", reflect.TypeOf((*MockDBHandler)(nil).Instance))
 }
 
+// Name mocks base method.
+func (m *MockDBHandler) Name() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Name")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// Name indicates an expected call of Name.
+func (mr *MockDBHandlerMockRecorder) Name() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Name", reflect.TypeOf((*MockDBHandler)(nil).Name))
+}
+
 // PgPool mocks base method.
-func (m *MockDBHandler) PgPool(ctx context.Context, cb func(context.Context, *pgxpool.Pool) error) error {
+func (m *MockDBHandler) PgPool(ctx context.Context, cb func(context.Context, pgc.PgPool) error) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "PgPool", ctx, cb)
 	ret0, _ := ret[0].(error)
@@ -93,12 +121,11 @@ func (mr *MockDBHandlerMockRecorder) RunMigrations(arg0 interface{}) *gomock.Cal
 }
 
 // Tx mocks base method.
-func (m *MockDBHandler) Tx(ctx context.Context, cb func(context.Context, pgx.Tx) (any, error)) (any, error) {
+func (m *MockDBHandler) Tx(ctx context.Context, cb func(context.Context, pgx.Tx) error) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Tx", ctx, cb)
-	ret0, _ := ret[0].(any)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // Tx indicates an expected call of Tx.

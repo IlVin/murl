@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const sqlUpSert string = `
@@ -19,9 +18,9 @@ WITH ins AS (
     ON CONFLICT (url) DO NOTHING
     RETURNING id
 )
-SELECT id, 0 AS conflict FROM ins
+SELECT id, 'f'::boolean AS conflict FROM ins
 UNION ALL
-SELECT id, 1 AS conflict FROM murl WHERE url = $1
+SELECT id, 't'::boolean AS conflict FROM murl WHERE url = $1
 LIMIT 1;
 `
 
@@ -48,11 +47,13 @@ const sqlSelect string = `
 // Чтобы протестировать драйвер постгреса, приходится городить интерфейс
 // DBHandler описывает методы pgc.PgHndl для мокирования в тестах
 type DBHandler interface {
-	Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) (any, error)) (any, error)
-	PgPool(ctx context.Context, cb func(ctx context.Context, p *pgxpool.Pool) error) error
+	Tx(ctx context.Context, cb func(ctx context.Context, tx pgx.Tx) error) error
+	PgPool(ctx context.Context, cb func(ctx context.Context, p pgc.PgPool) error) error
 	Ping(ctx context.Context) error
+	Name() string
 	Instance() string
 	RunMigrations(context.Context) error
+	Close() error
 }
 
 type PgRepoDrv struct {
@@ -75,6 +76,8 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 		return nil, fmt.Errorf("failed create PgRepoDrv: %w", err)
 	}
 
+	pgHndl.RunMigrations(ctx)
+
 	for i := 0; i < shardSize; i++ {
 		r.shards[i] = pgHndl
 	}
@@ -84,11 +87,19 @@ func newPgRepoDrv(ctx context.Context, cfg RepoDrvConfig) (RepoDrv, error) {
 	return r, nil
 }
 
+func (s *PgRepoDrv) Close() error {
+	errs := make([]error, 0, 10)
+	for i := range s.shards {
+		errs = append(errs, s.shards[i].Close())
+	}
+	return errors.Join(errs...)
+}
+
 func (s *PgRepoDrv) RunMigrations(ctx context.Context) error {
 	// Собираем уникальные инстансы
 	instances := make(map[string]DBHandler)
 	for i, shard := range s.shards {
-		instances[shard.Instance()] = s.shards[i]
+		instances[shard.Instance()+"/"+shard.Name()] = s.shards[i]
 	}
 
 	// На каждом инстансе запускаем миграцию
@@ -115,99 +126,126 @@ func (s *PgRepoDrv) getShard(shardID byte) (DBHandler, error) {
 	return s.shards[shardID], nil
 }
 
-// Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
-type upsertResult struct {
-	ID uint64
-	CF int
-}
-
-func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
+// UpSert Записывает строку в указанный шард БД и возвращает идентификатор записи и флаг конфликта
+func (s *PgRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, bool, error) {
 	shard, err := s.getShard(shardID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
-	res, err := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
-		var id uint64
-		var cf int
-		err := tx.QueryRow(ctx, sqlUpSert, str).Scan(&id, &cf)
-		return upsertResult{ID: id, CF: cf}, err
+	var id uint64
+	var cf bool
+
+	errTx := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, sqlUpSert, str).Scan(&id, &cf)
 	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, err)
+	if errTx != nil {
+		return 0, false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, errTx)
 	}
 
-	val, ok := res.(upsertResult)
-	if !ok {
-		return 0, errors.New("unexpected return type")
-	}
-
-	if val.CF != 0 {
-		return val.ID, ErrRecordAlreadyExists
-	}
-
-	return val.ID, nil
+	return id, cf, nil
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
+type shardBatch struct {
+	batch *pgx.Batch
+	items []event.PayloadBatchItem
+}
+
 func (s *PgRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchItem) ([]event.PayloadBatchItem, error) {
 	// Группируем элементы батча по шардам
-	byShard := make(map[byte][]int, len(s.shards))
-	for i, b := range batch {
-		_, err := s.getShard(b.ShardID)
-		if err != nil {
-			return nil, fmt.Errorf("shardID [%d] out of range [0, .., %d]: %v", b.ShardID, len(s.shards)-1, b)
+	byShardBatch := make(map[byte]*shardBatch)
+	for i := range batch {
+		sID := batch[i].ShardID
+		if byShardBatch[sID] == nil {
+			byShardBatch[sID] = &shardBatch{
+				batch: &pgx.Batch{},
+				items: make([]event.PayloadBatchItem, 0, len(batch)/len(s.shards)+1),
+			}
 		}
-		if byShard[b.ShardID] == nil {
-			byShard[b.ShardID] = make([]int, 0, defaultCap)
-		}
-		byShard[b.ShardID] = append(byShard[b.ShardID], i)
+		byShardBatch[sID].items = append(byShardBatch[sID].items, batch[i])
+		byShardBatch[sID].batch.Queue(sqlUpSert, batch[i].OrigURL)
 	}
-
-	// Группа параллельно работающих горутин, возвращающих ошибки
-	wg := sync.WaitGroup{}
 
 	// Запускаем горутины
-	for sID, items := range byShard {
+	resCh := make(chan event.PayloadBatchItem, len(batch))
+	wg := sync.WaitGroup{}
+	for sID, b := range byShardBatch {
 		wg.Add(1)
-		go func(items []int, shard DBHandler) {
+		go func(sID byte, b *shardBatch) {
 			defer wg.Done()
-			_, batchErr := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) (any, error) {
-				b := &pgx.Batch{}
-				for _, i := range items {
-					b.Queue(sqlUpSert, batch[i].OrigURL)
+
+			shard, err := s.getShard(sID)
+			if err != nil {
+				// Весь батч ошибочный
+				slog.Error("shard access failed",
+					slog.Any("err", err),
+					slog.Int("sID", int(sID)),
+				)
+				for i := range b.items {
+					b.items[i].Idx = 0
+					b.items[i].ConflictFlag = false
+					b.items[i].Err = errInternalServerError
+					resCh <- b.items[i]
 				}
-				br := tx.SendBatch(ctx, b)
+				return
+			}
+
+			errPool := shard.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				br := tx.SendBatch(ctx, b.batch)
 				defer br.Close()
 
-				for _, i := range items {
-					var idx uint64
-					var cf int
-					if err := br.QueryRow().Scan(&idx, &cf); err != nil {
-						return nil, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, err)
+				// Вычитываем все результаты
+				for i := range b.items {
+					if err := ctx.Err(); err != nil {
+						return err
 					}
-					batch[i].Idx = idx
+					if err := br.QueryRow().Scan(&b.items[i].Idx, &b.items[i].ConflictFlag); err != nil {
+						return err
+					}
 				}
 
-				return nil, nil
+				return nil
 			})
 
-			if batchErr != nil {
-				slog.Error("failed to execute shard batch",
-					slog.Int("ShardID", int(sID)),
-					slog.Any("err", batchErr),
+			// Весь батч ошибочный
+			if errPool != nil {
+				slog.Error("shard batch failed",
+					slog.Any("err", errPool),
+					slog.Int("sID", int(sID)),
 				)
-				// Транзакция откатилась, помечаем ошибки в слайсе
-				for _, i := range items {
-					batch[i].Idx = 0
-					batch[i].Err = errInternalServerError
+				for i := range b.items {
+					b.items[i].Idx = 0
+					b.items[i].ConflictFlag = false
+					b.items[i].Err = errInternalServerError
 				}
 			}
-		}(items, s.shards[sID])
-	}
-	wg.Wait()
 
-	return batch, nil
+			// Пишем результат в канал
+			for i := range b.items {
+				resCh <- b.items[i]
+			}
+
+		}(sID, b)
+	}
+
+	// Ждем джобы и закрываем результирующий канал
+	go func() {
+		wg.Wait()
+		close(resCh)
+	}()
+
+	result := make([]event.PayloadBatchItem, 0, len(batch))
+	for range len(batch) {
+		select {
+		case res, ok := <-resCh:
+			if !ok {
+				return result, nil
+			}
+			result = append(result, res)
+		}
+	}
+	return result, nil
 }
 
 func (s *PgRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u string) error {
@@ -216,7 +254,7 @@ func (s *PgRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u string)
 		return fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
 	}
 
-	err = shard.PgPool(ctx, func(ctx context.Context, p *pgxpool.Pool) (err error) {
+	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgPool) error {
 		_, err = p.Exec(ctx, sqlSet, idx, u)
 		return err
 	})
@@ -236,7 +274,7 @@ func (s *PgRepoDrv) Select(ctx context.Context, shardID byte, idx uint64) (strin
 	}
 
 	var u string
-	err = shard.PgPool(ctx, func(ctx context.Context, p *pgxpool.Pool) error {
+	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgPool) error {
 		return p.QueryRow(ctx, sqlSelect, idx).Scan(&u)
 	})
 

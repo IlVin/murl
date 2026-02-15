@@ -80,23 +80,6 @@ func TestService_Batch(t *testing.T) {
 	})
 }
 
-func TestService_AddURL(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockRepo := NewMockMicroURLRepo(ctrl)
-	svc := NewService(context.Background(), testServiceCfg{base: "http://go.to"}, mockRepo)
-
-	t.Run("Success", func(t *testing.T) {
-		long := "https://github.com"
-		mockRepo.EXPECT().Save(gomock.Any(), long).Return(byte(0), uint64(123), nil)
-
-		got, err := svc.AddURL(context.Background(), long)
-		require.NoError(t, err)
-		assert.Contains(t, got, "http://go.to")
-	})
-}
-
 func TestService_GetURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

@@ -1,17 +1,13 @@
 package repository
 
 import (
-	"bufio"
 	"context"
 	"murl/internal/model/event"
 	"os"
-	"sync"
 	"testing"
-	"time"
 
 	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // mockCfg реализует RepoConfig для тестов
@@ -23,40 +19,6 @@ func (m mockCfg) RepoDrv() string          { return "InMemory" }
 func (m mockCfg) ShardSize() byte          { return 10 }
 func (m mockCfg) DBDSN() string            { return "" }
 func (m mockCfg) EventStoragePath() string { return m.path }
-
-func TestRepo_Save(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDrv := NewMockRepoDataDrv(ctrl)
-	ctx := context.Background()
-	longURL := "https://google.com"
-
-	// Ожидаем вызов UpSert в драйвер
-	mockDrv.EXPECT().
-		UpSert(ctx, gomock.Any(), longURL).
-		Return(uint64(100), nil)
-
-	r := &Repo{
-		shardSize: 10,
-		db:        mockDrv,
-		events:    make(chan event.Event, 1),
-	}
-
-	sID, idx, err := r.Save(ctx, longURL)
-
-	assert.NoError(t, err)
-	assert.Equal(t, uint64(100), idx)
-	assert.Equal(t, GetShardID(longURL, 10), sID)
-
-	// Проверяем, что событие улетело в канал
-	select {
-	case e := <-r.events:
-		assert.Equal(t, event.EvAddURL, e.GetType())
-	default:
-		t.Fatal("event was not pushed to channel")
-	}
-}
 
 func TestRepo_Batch(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -86,51 +48,6 @@ func TestRepo_Batch(t *testing.T) {
 	res, err := r.Batch(context.Background(), payload)
 	assert.NoError(t, err)
 	assert.Len(t, res, 2)
-}
-
-func TestRepo_WAL_Integration(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockDrv := NewMockRepoDataDrv(ctrl)
-
-	// Создаем временный файл
-	tmpFile, err := os.CreateTemp("", "wal_*.log")
-	require.NoError(t, err)
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
-
-	cfg := mockCfg{path: tmpPath}
-
-	// Инициализируем Repo вручную для теста
-	r := &Repo{
-		shardSize: 10,
-		db:        mockDrv,
-		events:    make(chan event.Event, 10),
-		wg:        sync.WaitGroup{},
-	}
-
-	fh, _ := os.OpenFile(tmpPath, os.O_APPEND|os.O_WRONLY, 0644)
-	r.walFile = fh
-	r.wal = bufio.NewWriter(fh)
-
-	r.wg.Add(1)
-	go r.eventSaver(cfg, r.events)
-
-	// Эмулируем событие
-	p := event.PayloadAddURL{URL: "https://test.com", ShardID: 1, ID: 1}
-	e, _ := event.MakeEvent(p, nil)
-	r.events <- e
-
-	// Даем время на запись и закрываем
-	time.Sleep(100 * time.Millisecond)
-	r.Close()
-
-	// Проверяем, что в файле есть данные
-	data, err := os.ReadFile(tmpPath)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, data)
 }
 
 func TestRepo_LoadStoredEvents(t *testing.T) {

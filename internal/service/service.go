@@ -21,7 +21,7 @@ type ServiceConfig interface {
 }
 
 type MicroURLRepo interface {
-	Save(ctx context.Context, lURL string) (byte, uint64, error)
+	Save(ctx context.Context, lURL string) (byte, uint64, bool, error)
 	Batch(ctx context.Context, e event.PayloadBatch) (event.PayloadBatch, error)
 	Load(ctx context.Context, sID byte, idx uint64) (string, error)
 	Ping(ctx context.Context) error
@@ -66,21 +66,21 @@ func (s *Service) NormalizeURL(ctx context.Context, longURL string) (string, err
 	return u.String(), nil
 }
 
-func (s *Service) AddURL(ctx context.Context, longURL string) (string, error) {
+func (s *Service) AddURL(ctx context.Context, longURL string) (string, bool, error) {
 
 	normalizedURL, err := s.NormalizeURL(ctx, longURL)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	sID, idx, err := s.repo.Save(ctx, normalizedURL)
+	sID, idx, cf, errSave := s.repo.Save(ctx, normalizedURL)
 
-	if err != nil {
+	if errSave != nil {
 		slog.Error("repo save failed",
 			slog.String("url", normalizedURL),
-			slog.Any("err", err),
+			slog.Any("err", errSave),
 		)
-		return "", fmt.Errorf("failed to persist data: %w", err)
+		return "", false, fmt.Errorf("failed to persist data: %w", err)
 	}
 
 	sURL, err := model.MakeShortURL(sID, idx, &s.shortBaseURL.URL)
@@ -89,7 +89,7 @@ func (s *Service) AddURL(ctx context.Context, longURL string) (string, error) {
 			slog.Uint64("sID", uint64(sID)),
 			slog.Uint64("idx", idx),
 		)
-		return "", fmt.Errorf("failed to generate short URL: %w", err)
+		return "", false, fmt.Errorf("failed to generate short URL: %w", err)
 	}
 
 	slog.Info("URL shortened",
@@ -98,7 +98,7 @@ func (s *Service) AddURL(ctx context.Context, longURL string) (string, error) {
 		slog.String("short_url", sURL),
 	)
 
-	return sURL, nil
+	return sURL, cf, errSave
 }
 
 func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {

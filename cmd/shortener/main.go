@@ -48,7 +48,13 @@ func run() error {
 	)
 
 	// Репозиторий
-	repo := repository.NewRepo(ctx, cfg)
+	repo, err := repository.NewRepo(ctx, cfg)
+	if err != nil {
+		slog.Error("repository error",
+			slog.Any("err", err),
+		)
+		return err
+	}
 	defer repo.Close()
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL

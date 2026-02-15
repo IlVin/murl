@@ -3,6 +3,7 @@ package repository
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"murl/internal/model/event"
@@ -14,6 +15,7 @@ import (
 )
 
 //go:generate mockgen -source=$GOFILE -destination=repo_mocks_test.go -package=$GOPACKAGE
+//go:generate mockgen                 -destination=pgx_mocks_test.go      -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
 
 // Объявляем список используемых параметров конфига
 type RepoConfig interface {
@@ -26,11 +28,13 @@ type RepoConfig interface {
 // Поддерживаем драйвера, которые работают с шардами
 // Т.е. идентификатор 2х мерный: shardID + record_id
 type RepoDataDrv interface {
-	UpSert(ctx context.Context, shardID byte, str string) (uint64, error)
+	UpSert(ctx context.Context, shardID byte, str string) (uint64, bool, error)
 	BatchUpSert(ctx context.Context, batch []event.PayloadBatchItem) ([]event.PayloadBatchItem, error)
 	Select(ctx context.Context, shardID byte, idx uint64) (string, error)
 	Set(ctx context.Context, shardID byte, idx uint64, u string) error
 	Ping(ctx context.Context) error
+	RunMigrations(ctx context.Context) error
+	Close() error
 }
 
 type Repo struct {
@@ -43,11 +47,14 @@ type Repo struct {
 }
 
 // Конструктор хранилища с драйвером
-func NewRepo(ctx context.Context, cfg RepoConfig) *Repo {
+func NewRepo(ctx context.Context, cfg RepoConfig) (*Repo, error) {
 	// Адаптер к определенной БД. Оперируем: вычислить шард, записать строку, прочитать до цифровому ID
 	drv, err := NewRepoDrv(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init drv: %w", err)
+	}
 
-	if err == nil && drv != nil {
+	if drv != nil {
 		loadStoredEvents(ctx, cfg, drv)
 	}
 
@@ -72,30 +79,43 @@ func NewRepo(ctx context.Context, cfg RepoConfig) *Repo {
 
 	r.wg.Add(1)
 	go r.eventSaver(cfg, r.events)
-	time.Sleep(1 * time.Second)
 
-	return r
+	return r, nil
+}
+
+func (r *Repo) Close() error {
+	errs := make([]error, 0, 10)
+	if err := r.db.Close(); err != nil {
+		errs = append(errs, err)
+	}
+
+	close(r.events)
+	r.wg.Wait()
+
+	return errors.Join(errs...)
 }
 
 func loadStoredEvents(ctx context.Context, cfg RepoConfig, drv RepoDrv) {
 	// Если файл не задан, то выходим
-	if cfg.EventStoragePath() == "" {
+	path := cfg.EventStoragePath()
+	if path == "" {
 		return
 	}
 
 	// Проверяем, существует ли файл вообще
-	if _, err := os.Stat(cfg.EventStoragePath()); os.IsNotExist(err) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
 		slog.Info("event storage not found",
-			slog.String("path", cfg.EventStoragePath()),
+			slog.String("path", path),
 		)
 		return
 	}
 
 	// Чтение событий из файла
-	fh, err := os.OpenFile(cfg.EventStoragePath(), os.O_RDONLY, 0666)
+	fh, err := os.OpenFile(path, os.O_RDONLY, 0644)
 	if err != nil {
 		slog.Error("cannot open file",
 			slog.Any("err", err),
+			slog.String("path", path),
 		)
 		return
 	}
@@ -130,13 +150,13 @@ func loadStoredEvents(ctx context.Context, cfg RepoConfig, drv RepoDrv) {
 			}
 		case event.EvAddURL:
 			p := event.PayloadAddURL{}
-			if err = evt.GetPayload(&p); err != nil {
+			if err := evt.GetPayload(&p); err != nil {
 				slog.Error("cannot get event payload",
 					slog.Any("err", err),
 				)
 				continue
 			}
-			err = drv.Set(ctx, p.ShardID, p.ID, p.URL)
+			err := drv.Set(ctx, p.ShardID, p.ID, p.URL)
 			if err != nil {
 				slog.Error("failed to save event payload to DB",
 					slog.Any("err", err),
@@ -164,29 +184,30 @@ func GetShardID(key string, shardSize byte) byte {
 // Запись в БД потоко БЕЗОПАСНАЯ
 // Записывает строку в БД
 // Возвращает строковый идентификатор записи
-func (r *Repo) Save(ctx context.Context, longStr string) (byte, uint64, error) {
+func (r *Repo) Save(ctx context.Context, longStr string) (byte, uint64, bool, error) {
 	// Запись в БД маппинга
 	sID := GetShardID(longStr, r.shardSize)
-	idx, err := r.db.UpSert(ctx, sID, longStr)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to save URL mapping to the database: %w", err)
+	idx, cf, errUS := r.db.UpSert(ctx, sID, longStr)
+	if errUS != nil {
+		return 0, 0, false, fmt.Errorf("failed to save URL mapping to the database: %w", errUS)
 	}
 
 	p := event.PayloadAddURL{
-		ShardID: sID,
-		ID:      idx,
-		URL:     longStr,
+		ShardID:      sID,
+		ID:           idx,
+		URL:          longStr,
+		ConflictFlag: cf,
 	}
 
 	e, err := event.MakeEvent(p, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("event construction failed: %w", err)
+		return sID, idx, cf, errors.Join(fmt.Errorf("event construction failed: %w", err), errUS)
 	}
 
 	// Отправка события на запись
 	r.PushEvent(ctx, e)
 
-	return sID, idx, nil
+	return sID, idx, cf, errUS
 }
 
 func (r *Repo) PushEvent(ctx context.Context, e event.Event) {
@@ -229,11 +250,6 @@ func (r *Repo) Load(ctx context.Context, sID byte, idx uint64) (string, error) {
 	}
 
 	return lURL, nil
-}
-
-func (r *Repo) Close() {
-	close(r.events)
-	r.wg.Wait()
 }
 
 func (r *Repo) eventSaver(cfg RepoConfig, ch <-chan event.Event) {
@@ -285,7 +301,7 @@ func (r *Repo) eventSaver(cfg RepoConfig, ch <-chan event.Event) {
 				continue
 			}
 
-			if err = r.wal.WriteByte(0x0A); err != nil {
+			if err = r.wal.WriteByte('\n'); err != nil {
 				slog.Error("save event problem",
 					slog.Any("err", err),
 				)

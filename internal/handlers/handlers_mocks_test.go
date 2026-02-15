@@ -59,12 +59,13 @@ func (m *MockMicroURLService) EXPECT() *MockMicroURLServiceMockRecorder {
 }
 
 // AddURL mocks base method.
-func (m *MockMicroURLService) AddURL(ctx context.Context, url string) (string, error) {
+func (m *MockMicroURLService) AddURL(ctx context.Context, url string) (string, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AddURL", ctx, url)
 	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // AddURL indicates an expected call of AddURL.

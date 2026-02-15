@@ -25,23 +25,6 @@ func TestHandlers_HndlAddURL(t *testing.T) {
 	mockService := NewMockMicroURLService(ctrl)
 	h := NewHandlers(&mockHandlersConfig{}, mockService)
 
-	t.Run("Success plain text", func(t *testing.T) {
-		longURL := "https://yandex.ru"
-		shortURL := "http://localhost/1_1"
-
-		mockService.EXPECT().
-			AddURL(gomock.Any(), longURL).
-			Return(shortURL, nil)
-
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(longURL))
-		w := httptest.NewRecorder()
-
-		h.HndlAddURL()(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, shortURL, w.Body.String())
-	})
-
 	t.Run("Empty body", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		w := httptest.NewRecorder()

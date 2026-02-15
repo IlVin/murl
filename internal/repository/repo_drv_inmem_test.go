@@ -4,157 +4,136 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"murl/internal/model/event"
 	"sync"
 	"testing"
 
+	"murl/internal/model/event"
+
+	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// MockConfig для тестов
-type mockConfig struct {
-	shardSize byte
-}
+func TestInMemoryRepoDrv(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-func (m mockConfig) ShardSize() byte          { return m.shardSize }
-func (m mockConfig) DBDSN() string            { return "" }
-func (m mockConfig) RepoDrv() string          { return "InMemory" }
-func (m mockConfig) EventStoragePath() string { return "" }
+	// Настройка конфига: 2 шарда
+	mockCfg := NewMockRepoDrvConfig(ctrl)
+	mockCfg.EXPECT().ShardSize().Return(uint8(2)).AnyTimes()
 
-func TestInMemory_UpSert(t *testing.T) {
 	ctx := context.Background()
-	cfg := mockConfig{shardSize: 2}
-	repo := newInMemoryRepoDrv(cfg)
 
-	t.Run("new record creation", func(t *testing.T) {
-		id, err := repo.UpSert(ctx, 0, "http://google.com")
-		assert.NoError(t, err)
-		assert.Equal(t, uint64(0), id)
+	t.Run("UpSert and Select", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		url := "https://example.com"
+		shardID := byte(0)
 
-		// Повторный UpSert того же URL должен вернуть тот же ID
-		id2, err := repo.UpSert(ctx, 0, "http://google.com")
+		// Первая запись
+		idx, cf, err := drv.UpSert(ctx, shardID, url)
 		assert.NoError(t, err)
-		assert.Equal(t, id, id2)
+		assert.False(t, cf)
+		assert.Equal(t, uint64(1), idx)
+
+		// Повторная запись того же URL (Conflict)
+		idx2, cf2, err := drv.UpSert(ctx, shardID, url)
+		assert.NoError(t, err)
+		assert.True(t, cf2)
+		assert.Equal(t, idx, idx2)
+
+		// Проверка через Select
+		res, err := drv.Select(ctx, shardID, idx)
+		assert.NoError(t, err)
+		assert.Equal(t, url, res)
 	})
 
-	t.Run("different shards", func(t *testing.T) {
-		// Тот же URL в другом шарде — это новая запись (нормально для шардирования)
-		id, err := repo.UpSert(ctx, 1, "http://google.com")
-		assert.NoError(t, err)
-		assert.Equal(t, uint64(0), id) // В этом шарде индекс начался с 0
-	})
-}
+	t.Run("Sharding isolation", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		url := "https://unique.com"
+		// Пишем в разные шарды
+		idx0, _, _ := drv.UpSert(ctx, 0, url)
+		idx1, _, _ := drv.UpSert(ctx, 1, url)
 
-func TestInMemory_SetAndSelect(t *testing.T) {
-	ctx := context.Background()
-	cfg := mockConfig{shardSize: 1}
-	repo := newInMemoryRepoDrv(cfg)
+		// В каждом шарде свой счетчик lastIdx, поэтому индексы могут совпасть (оба 1)
+		// Но данные лежат в разных структурах
+		assert.Equal(t, idx0, idx1)
 
-	t.Run("set then select", func(t *testing.T) {
-		err := repo.Set(ctx, 0, 100, "http://apple.com")
-		assert.NoError(t, err)
-
-		val, err := repo.Select(ctx, 0, 100)
-		assert.NoError(t, err)
-		assert.Equal(t, "http://apple.com", val)
+		res0, _ := drv.Select(ctx, 0, idx0)
+		res1, _ := drv.Select(ctx, 1, idx1)
+		assert.Equal(t, url, res0)
+		assert.Equal(t, url, res1)
 	})
 
-	t.Run("overwrite existing index", func(t *testing.T) {
-		// URL "A" -> ID 1
-		_ = repo.Set(ctx, 0, 1, "A")
-		// URL "B" -> ID 2
-		_ = repo.Set(ctx, 0, 2, "B")
+	t.Run("BatchUpSert", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		batch := []event.PayloadBatchItem{
+			{OrigURL: "b1", ShardID: 0},
+			{OrigURL: "b2", ShardID: 1},
+		}
 
-		// Перезаписываем ID 1 новым URL "B"
-		// Старая связь B->2 должна удалиться, B->1 появиться, A->1 исчезнуть.
-		err := repo.Set(ctx, 0, 1, "B")
+		res, err := drv.BatchUpSert(ctx, batch)
+		assert.NoError(t, err)
+		assert.Len(t, res, 2)
+		assert.NotEqual(t, uint64(0), res[1].Idx) // Проверка, что во втором шарде тоже прошла запись
+	})
+
+	t.Run("Set logic", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		shardID := byte(0)
+		customIdx := uint64(100)
+		url := "https://custom.com"
+
+		err := drv.Set(ctx, shardID, customIdx, url)
 		assert.NoError(t, err)
 
-		// Проверяем, что ID 2 больше не содержит "B"
-		_, err = repo.Select(ctx, 0, 2)
-		assert.Error(t, err, "ID 2 should have been cleared because URL 'B' moved to ID 1")
+		// Проверяем, что индекс обновился
+		res, _ := drv.Select(ctx, shardID, customIdx)
+		assert.Equal(t, url, res)
 
-		// Проверяем, что ID 1 теперь "B"
-		val, _ := repo.Select(ctx, 0, 1)
-		assert.Equal(t, "B", val)
+		// Проверяем, что lastIdx сдвинулся
+		newIdx, _, _ := drv.UpSert(ctx, shardID, "next-url")
+		assert.Equal(t, uint64(101), newIdx)
 	})
-}
 
-func TestInMemory_BatchUpSert(t *testing.T) {
-	ctx := context.Background()
-	cfg := mockConfig{shardSize: 2}
-	repo := newInMemoryRepoDrv(cfg)
-
-	batch := []event.PayloadBatchItem{
-		{CorrelationID: "c1", OrigURL: "u1", ShardID: 0}, // Получит Shard 0, Idx 0
-		{CorrelationID: "c2", OrigURL: "u2", ShardID: 1}, // Получит Shard 1, Idx 0
-		{CorrelationID: "c3", OrigURL: "u1", ShardID: 0}, // Получит Shard 0, Idx 0 (дубликат)
-		{CorrelationID: "c4", OrigURL: "u3", ShardID: 0}, // Получит Shard 0, Idx 1
-	}
-
-	res, err := repo.BatchUpSert(ctx, batch)
-	assert.NoError(t, err)
-	require.Len(t, res, 4)
-
-	// 1. Проверяем, что дубликат URL в одном шарде вернул тот же ID
-	assert.Equal(t, res[0].Idx, res[2].Idx, "u1 in shard 0 should have same ID")
-
-	// 2. Проверяем, что разные URL в одном шарде имеют разные ID
-	assert.NotEqual(t, res[0].Idx, res[3].Idx, "u1 and u3 in shard 0 must have different IDs")
-
-	// 3. Проверяем, что данные записаны в правильные шарды
-	assert.Equal(t, byte(0), res[0].ShardID)
-	assert.Equal(t, byte(1), res[1].ShardID)
-}
-
-func TestInMemory_Errors(t *testing.T) {
-	ctx := context.Background()
-	repo := newInMemoryRepoDrv(mockConfig{shardSize: 1})
-
-	t.Run("not found", func(t *testing.T) {
-		_, err := repo.Select(ctx, 0, 999)
+	t.Run("Errors and Limits", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		// Ошибка шарда
+		_, _, err := drv.UpSert(ctx, 10, "url")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "record not found")
-	})
 
-	t.Run("shard out of range", func(t *testing.T) {
-		err := repo.Set(ctx, 5, 1, "test")
+		// Запись несуществующего индекса
+		_, err = drv.Select(ctx, 0, 9999)
 		assert.Error(t, err)
+
+		// Overflow check (lastIdx)
+		shard, _ := (drv.(*InMemoryRepoDrv)).getShard(0)
+		shard.lastIdx = math.MaxUint64
+		_, _, err = drv.UpSert(ctx, 0, "any")
+		assert.EqualError(t, err, "lastIdx overflow")
 	})
 
-	t.Run("max index error", func(t *testing.T) {
-		err := repo.Set(ctx, 0, math.MaxUint64, "test")
-		assert.Error(t, err)
-		assert.Equal(t, "cannot set max uint64 index", err.Error())
+	t.Run("Concurrent access", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		const goroutines = 100
+		const ops = 100
+		wg := sync.WaitGroup{}
+		wg.Add(goroutines)
+
+		for i := 0; i < goroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < ops; j++ {
+					u := fmt.Sprintf("url-%d-%d", id, j)
+					_, _, _ = drv.UpSert(ctx, 0, u)
+				}
+			}(i)
+		}
+		wg.Wait()
+		// Если race detector (go test -race) молчит, тест пройден
 	})
-}
 
-// Тест на конкурентность (Race Detector)
-func TestInMemory_Race(t *testing.T) {
-	ctx := context.Background()
-	cfg := mockConfig{shardSize: 4}
-	repo := newInMemoryRepoDrv(cfg)
-
-	wg := sync.WaitGroup{}
-	workers := 20
-	iterations := 100
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
-				shard := byte(workerID % 4)
-				url := fmt.Sprintf("url-%d-%d", workerID, j)
-
-				// Одновременно читаем и пишем
-				_, _ = repo.UpSert(ctx, shard, url)
-				_, _ = repo.Select(ctx, shard, uint64(j))
-				_ = repo.Set(ctx, shard, uint64(j+1000), url)
-			}
-		}(i)
-	}
-
-	wg.Wait()
+	t.Run("Ping and Migrations", func(t *testing.T) {
+		drv := newInMemoryRepoDrv(mockCfg)
+		assert.NoError(t, drv.Ping(ctx))
+		assert.NoError(t, drv.RunMigrations(ctx))
+	})
 }

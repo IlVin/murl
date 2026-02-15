@@ -129,6 +129,20 @@ func (mr *MockRepoDrvMockRecorder) BatchUpSert(ctx, batch interface{}) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BatchUpSert", reflect.TypeOf((*MockRepoDrv)(nil).BatchUpSert), ctx, batch)
 }
 
+// Close mocks base method.
+func (m *MockRepoDrv) Close() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Close")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Close indicates an expected call of Close.
+func (mr *MockRepoDrvMockRecorder) Close() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRepoDrv)(nil).Close))
+}
+
 // Ping mocks base method.
 func (m *MockRepoDrv) Ping(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -141,6 +155,20 @@ func (m *MockRepoDrv) Ping(ctx context.Context) error {
 func (mr *MockRepoDrvMockRecorder) Ping(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockRepoDrv)(nil).Ping), ctx)
+}
+
+// RunMigrations mocks base method.
+func (m *MockRepoDrv) RunMigrations(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RunMigrations", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RunMigrations indicates an expected call of RunMigrations.
+func (mr *MockRepoDrvMockRecorder) RunMigrations(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RunMigrations", reflect.TypeOf((*MockRepoDrv)(nil).RunMigrations), ctx)
 }
 
 // Select mocks base method.
@@ -173,12 +201,13 @@ func (mr *MockRepoDrvMockRecorder) Set(ctx, shardID, idx, u interface{}) *gomock
 }
 
 // UpSert mocks base method.
-func (m *MockRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
+func (m *MockRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpSert", ctx, shardID, str)
 	ret0, _ := ret[0].(uint64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // UpSert indicates an expected call of UpSert.

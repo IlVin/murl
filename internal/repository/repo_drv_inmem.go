@@ -45,6 +45,22 @@ func newInMemoryRepoDrv(cfg RepoDrvConfig) RepoDrv {
 	return s
 }
 
+func (s *InMemoryRepoDrv) RunMigrations(ctx context.Context) error {
+	return nil
+}
+
+func (s *InMemoryRepoDrv) Close() error {
+	return nil
+}
+
+func (s *InMemoryRepoDrv) Name() string {
+	return "InMemoryRepoDrvName"
+}
+
+func (s *InMemoryRepoDrv) Instance() string {
+	return "InMemoryRepoDrvInstance"
+}
+
 func (s *InMemoryRepoDrv) getShard(shardID byte) (*inMemoryShard, error) {
 	if int(shardID) >= len(s.shards) {
 		return nil, fmt.Errorf("shardID [%d] out of range [0, .., %d]", shardID, len(s.shards)-1)
@@ -53,44 +69,45 @@ func (s *InMemoryRepoDrv) getShard(shardID byte) (*inMemoryShard, error) {
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
-func (s *InMemoryRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, error) {
+func (s *InMemoryRepoDrv) UpSert(ctx context.Context, shardID byte, str string) (uint64, bool, error) {
 	shard, err := s.getShard(shardID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	shard.mu.RLock()
 
 	if shard.lastIdx == math.MaxUint64 {
-		return 0, errors.New("lastIdx overflow")
+		return 0, false, errors.New("lastIdx overflow")
 	}
 	if idx, ok := shard.index[str]; ok {
 		shard.mu.RUnlock()
-		return idx, nil
+		return idx, true, nil
 	}
 	shard.mu.RUnlock()
 
 	shard.mu.Lock()
 	if idx, ok := shard.index[str]; ok {
 		shard.mu.Unlock()
-		return idx, nil
+		return idx, false, nil
 	}
+	shard.lastIdx++ // Нумерация начинается с 1
 	idx := shard.lastIdx
-	shard.lastIdx++
 	shard.data[idx] = str
 	shard.index[str] = idx
 	shard.mu.Unlock()
 
-	return idx, nil
+	return idx, false, nil
 }
 
 // Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
 func (s *InMemoryRepoDrv) BatchUpSert(ctx context.Context, batch []event.PayloadBatchItem) ([]event.PayloadBatchItem, error) {
-	for i := 0; i < len(batch); i++ {
-		if idx, err := s.UpSert(ctx, batch[i].ShardID, batch[i].OrigURL); err != nil {
+	for i := range batch {
+		if idx, cf, err := s.UpSert(ctx, batch[i].ShardID, batch[i].OrigURL); err != nil {
 			batch[i].Err = errInternalServerError
 		} else {
 			batch[i].Idx = idx
+			batch[i].ConflictFlag = cf
 		}
 	}
 
@@ -120,7 +137,7 @@ func (s *InMemoryRepoDrv) Set(ctx context.Context, shardID byte, idx uint64, u s
 	shard.data[idx] = u
 	shard.index[u] = idx
 	if idx >= shard.lastIdx {
-		shard.lastIdx = idx + 1
+		shard.lastIdx = idx
 	}
 
 	return nil

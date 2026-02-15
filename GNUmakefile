@@ -12,6 +12,7 @@ all: test build
 
 build:
 	@echo "Building binary..."
+	go generate ./...
 	CGO_ENABLED=0 GOOS=linux go build -o $(BINARY_NAME) $(MAIN_PATH)
 
 ## Docker-build: Сборка образа на базе пустого scratch
@@ -115,4 +116,5 @@ iter11:
 iter12:
 	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration12$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'
 
-
+iter13:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration13$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'

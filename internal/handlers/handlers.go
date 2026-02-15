@@ -24,7 +24,7 @@ type HandlersConfig interface {
 
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
-	AddURL(ctx context.Context, url string) (string, error)
+	AddURL(ctx context.Context, url string) (string, bool, error)
 	Batch(ctx context.Context, e event.Event) (event.Event, error)
 	GetURL(ctx context.Context, url string) (string, error)
 	Ping(ctx context.Context) error
@@ -75,18 +75,26 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 			return
 		}
 
-		murl, err := h.service.AddURL(r.Context(), string(buf))
+		slog.Info("HndlAddURL",
+			slog.String("URL", string(buf)),
+		)
 
-		if err != nil {
+		murl, cf, errAdd := h.service.AddURL(r.Context(), string(buf))
+
+		if errAdd != nil {
 			slog.Warn("service cannot add URL",
-				slog.Any("err", err),
+				slog.Any("err", errAdd),
 			)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusCreated)
+		if cf {
+			w.WriteHeader(http.StatusConflict)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
 		if _, err := w.Write([]byte(murl)); err != nil {
 			slog.Warn("failed to write response",
 				slog.String("event", "network_error"),
@@ -138,14 +146,19 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			return
 		}
 
-		res, err := h.service.AddURL(r.Context(), jsReq.URL)
-		if err != nil {
+		slog.Info("HndlAPIShorten",
+			slog.String("URL", jsReq.URL),
+		)
+		res, cf, errAdd := h.service.AddURL(r.Context(), jsReq.URL)
+
+		if errAdd != nil {
 			slog.Warn("internal error",
-				slog.Any("err", err),
+				slog.Any("err", errAdd),
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
 		jsResp.Result = res
 
 		data, err := json.Marshal(jsResp)
@@ -158,7 +171,12 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		if cf {
+			w.WriteHeader(http.StatusConflict)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
+
 		if _, err := w.Write(data); err != nil {
 			slog.Debug("failed to write response",
 				slog.String("event", "network_error"),
@@ -239,6 +257,8 @@ func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
 			)
 			return
 		}
+
+		slog.Info("HndlAPIShortenBatch")
 
 		part := make(event.PayloadBatch, 0, 1000)
 		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
