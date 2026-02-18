@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 
 	uuid "github.com/google/uuid"
 )
@@ -157,14 +156,15 @@ func (e *baseEvent) GetPayload(dest any) error {
 	if len(e.evPayload) == 0 {
 		return fmt.Errorf("payload is nil")
 	}
-	rv := reflect.ValueOf(dest)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
-		return errors.New("dest must be a non-nil pointer")
+
+	p, ok := dest.(Payload)
+	if !ok {
+		return fmt.Errorf("type mismatch: dest is not Payload type")
 	}
-	if p, ok := dest.(Payload); ok {
-		if p.EventType() != e.evType {
-			return fmt.Errorf("type mismatch: event has %v, dest has %v", e.evType, p.EventType())
-		}
+
+	if p.EventType() != e.evType {
+		return fmt.Errorf("type mismatch: event has %v, dest has %v", e.evType, p.EventType())
 	}
+
 	return json.Unmarshal(e.evPayload, dest)
 }
