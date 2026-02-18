@@ -8,13 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"murl/internal/model/event"
+	"murl/internal/service"
 	"net/http"
 	"strings"
 
 	"github.com/bcicen/jstream"
 )
-
-const bodyLimit = 1024 * 1024
 
 //go:generate mockgen -source=$GOFILE -destination=handlers_mocks_test.go -package=$GOPACKAGE
 
@@ -24,7 +23,7 @@ type HandlersConfig interface {
 
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
-	AddURL(ctx context.Context, url string) (string, bool, error)
+	AddURL(ctx context.Context, url string) (string, error)
 	Batch(ctx context.Context, e event.Event) (event.Event, error)
 	GetURL(ctx context.Context, url string) (string, error)
 	Ping(ctx context.Context) error
@@ -41,16 +40,9 @@ func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 }
 
 func readBody(r *http.Request) ([]byte, error) {
-	// Ограничиваем чтение, чтобы избежать переполнения памяти
-	lr := io.LimitReader(r.Body, bodyLimit+1)
-
-	buf, err := io.ReadAll(lr)
+	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("body read failed: %w", err)
-	}
-
-	if len(buf) > bodyLimit {
-		return nil, errors.New("request body too large")
 	}
 
 	// Если ничего не прислали
@@ -59,6 +51,26 @@ func readBody(r *http.Request) ([]byte, error) {
 	}
 
 	return buf, nil
+}
+
+// ErrHandling по ошибке определяет какой http статус выдавать и возвращает ошибку,
+// если запрос не может быть успешным
+func ErrHandling(err error, statusOK int) (int, error) {
+	if err == nil {
+		return statusOK, nil
+	}
+
+	if errors.Is(err, service.ErrInvalidURLFormat) {
+		return http.StatusBadRequest, err
+	} else if errors.Is(err, service.ErrDomainIsBlocked) {
+		return http.StatusUnprocessableEntity, err
+	} else if errors.Is(err, service.ErrQuotaReached) {
+		return http.StatusTooManyRequests, err
+	} else if errors.Is(err, service.ErrConflict) {
+		return http.StatusConflict, nil
+	}
+
+	return http.StatusInternalServerError, err
 }
 
 // =========== POST / ==================
@@ -75,27 +87,29 @@ func (h *Handlers) HndlAddURL() http.HandlerFunc {
 			return
 		}
 
-		slog.Info("HndlAddURL",
-			slog.String("URL", string(buf)),
-		)
+		longURL := string(buf)
+		shortURL, err := h.service.AddURL(r.Context(), longURL)
 
-		murl, cf, errAdd := h.service.AddURL(r.Context(), string(buf))
+		httpStatus, err := ErrHandling(err, http.StatusCreated)
 
-		if errAdd != nil {
+		if err != nil {
 			slog.Warn("service cannot add URL",
-				slog.Any("err", errAdd),
+				slog.String("URL", longURL),
+				slog.Any("err", err),
 			)
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(httpStatus)
 			return
 		}
 
+		slog.Info("URL shortened",
+			slog.String("long_url", longURL),
+			slog.String("short_url", shortURL),
+		)
+
 		w.Header().Set("Content-Type", "text/plain")
-		if cf {
-			w.WriteHeader(http.StatusConflict)
-		} else {
-			w.WriteHeader(http.StatusCreated)
-		}
-		if _, err := w.Write([]byte(murl)); err != nil {
+		w.WriteHeader(httpStatus)
+
+		if _, err := w.Write([]byte(shortURL)); err != nil {
 			slog.Warn("failed to write response",
 				slog.String("event", "network_error"),
 				slog.Any("err", err),
@@ -146,20 +160,29 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 			return
 		}
 
-		slog.Info("HndlAPIShorten",
-			slog.String("URL", jsReq.URL),
-		)
-		res, cf, errAdd := h.service.AddURL(r.Context(), jsReq.URL)
+		longURL := jsReq.URL
 
-		if errAdd != nil {
-			slog.Warn("internal error",
-				slog.Any("err", errAdd),
+		slog.Info("HndlAPIShorten",
+			slog.String("URL", longURL),
+		)
+		shortURL, err := h.service.AddURL(r.Context(), longURL)
+		httpStatus, err := ErrHandling(err, http.StatusCreated)
+
+		if err != nil {
+			slog.Warn("service cannot add URL",
+				slog.String("URL", longURL),
+				slog.Any("err", err),
 			)
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(httpStatus)
 			return
 		}
 
-		jsResp.Result = res
+		slog.Info("URL shortened",
+			slog.String("long_url", longURL),
+			slog.String("short_url", shortURL),
+		)
+
+		jsResp.Result = shortURL
 
 		data, err := json.Marshal(jsResp)
 		if err != nil {
@@ -171,11 +194,7 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if cf {
-			w.WriteHeader(http.StatusConflict)
-		} else {
-			w.WriteHeader(http.StatusCreated)
-		}
+		w.WriteHeader(httpStatus)
 
 		if _, err := w.Write(data); err != nil {
 			slog.Debug("failed to write response",

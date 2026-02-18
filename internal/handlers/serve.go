@@ -12,6 +12,7 @@ import (
 type RouterConfig interface {
 	middleware.CompressConfig
 	middleware.LoggingConfig
+	middleware.LimiterConfig
 	RouterType() string
 }
 
@@ -58,9 +59,11 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	mux.HandleFunc("/", s.HndlDefault())
 
 	// Middlewares
-	return middleware.WithLogging(cfg)(
-		middleware.WithCompress(cfg)(
-			mux,
+	return middleware.WithLimiter(cfg)(
+		middleware.WithLogging(cfg)(
+			middleware.WithCompress(cfg)(
+				mux,
+			),
 		),
 	)
 }
@@ -71,6 +74,7 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	r := chi.NewRouter()
 
 	// Middlewares
+	r.Use(middleware.WithLimiter(cfg))
 	r.Use(middleware.WithLogging(cfg))
 	r.Use(middleware.WithCompress(cfg))
 

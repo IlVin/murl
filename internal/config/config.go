@@ -22,6 +22,7 @@ type Config struct {
 	eventStoragePath         string
 	dbConfigPath             string
 	dbDSN                    string
+	maxBodySize              int64
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -50,6 +51,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		eventStoragePath: "",
 		dbConfigPath:     "",
 		dbDSN:            "",
+		maxBodySize:      1024 * 1024,
 	}
 
 	// Command line arguments
@@ -125,6 +127,14 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		cfg = cfg.SetRepoDrv("PgDB")
 	}
 	return cfg, nil
+}
+
+func (c Config) MaxBodySize() int64 {
+	return c.maxBodySize
+}
+func (c Config) SetMaxBodySize(maxBodySize int64) Config {
+	c.maxBodySize = maxBodySize
+	return c
 }
 
 func (c Config) DBDSN() string {

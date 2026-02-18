@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -37,10 +38,7 @@ func run() error {
 	cmdArgs := os.Args[1:]
 	cfg, err := config.NewConfig(&cmdArgs, nil)
 	if err != nil {
-		slog.Error("config error",
-			slog.Any("err", err),
-		)
-		return err
+		return fmt.Errorf("failed to initialize config object: %w", err)
 	}
 	slog.Info("configuration initialized",
 		slog.String("version", cfg.Version()),
@@ -50,10 +48,7 @@ func run() error {
 	// Репозиторий
 	repo, err := repository.NewRepo(ctx, cfg)
 	if err != nil {
-		slog.Error("repository error",
-			slog.Any("err", err),
-		)
-		return err
+		return fmt.Errorf("failed to initialize the repository object: %w", err)
 	}
 	defer repo.Close()
 

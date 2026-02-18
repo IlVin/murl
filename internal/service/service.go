@@ -13,7 +13,10 @@ import (
 
 //go:generate mockgen -source=$GOFILE -destination=service_mocks_test.go -package=$GOPACKAGE
 
-const errBadURLFormat string = "bad URL format"
+var ErrInvalidURLFormat = errors.New("invalid URL format")
+var ErrDomainIsBlocked = errors.New("domain is blocked")
+var ErrConflict = errors.New("URL is already shortened")
+var ErrQuotaReached = errors.New("quota reached")
 
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
@@ -40,65 +43,62 @@ func NewService(ctx context.Context, cfg ServiceConfig, repo MicroURLRepo) *Serv
 	}
 }
 
-func (s *Service) NormalizeURL(ctx context.Context, longURL string) (string, error) {
+func (s *Service) NormalizeURL(ctx context.Context, longURL string) (*url.URL, error) {
 	u, err := url.Parse(longURL)
 	if err != nil {
 		slog.Debug("invalid URL provided",
 			slog.String("long_url", longURL),
 			slog.Any("err", err),
 		)
-		return "", fmt.Errorf("invalid URL format: %w", err)
+		return nil, errors.Join(ErrInvalidURLFormat, err)
 	}
 	if !u.IsAbs() {
 		slog.Info("longURL is not absolute",
 			slog.String("long_url", longURL),
 		)
-		return "", fmt.Errorf("URL must be absolute (include scheme)")
+		return nil, errors.Join(ErrInvalidURLFormat, fmt.Errorf("URL must be absolute (include scheme)"))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		slog.Info("invalid scheme",
 			slog.String("long_url", longURL),
 			slog.String("scheme", u.Scheme),
 		)
-		return "", fmt.Errorf("unsupported protocol scheme: %s", u.Scheme)
+		return nil, errors.Join(ErrInvalidURLFormat, fmt.Errorf("unsupported protocol scheme: %s", u.Scheme))
 	}
 
-	return u.String(), nil
+	return u, nil
 }
 
-func (s *Service) AddURL(ctx context.Context, longURL string) (string, bool, error) {
+func (s *Service) AddURL(ctx context.Context, longURL string) (string, error) {
 
+	// Нормализация URL
 	normalizedURL, err := s.NormalizeURL(ctx, longURL)
 	if err != nil {
-		return "", false, err
+		return "", fmt.Errorf("cannot normalize long URL: %w", err)
 	}
 
-	sID, idx, cf, errSave := s.repo.Save(ctx, normalizedURL)
-
-	if errSave != nil {
-		slog.Error("repo save failed",
-			slog.String("url", normalizedURL),
-			slog.Any("err", errSave),
-		)
-		return "", false, fmt.Errorf("failed to persist data: %w", err)
+	// Предохранитель от циклических сокращений
+	if s.shortBaseURL.URL.Hostname() == normalizedURL.Hostname() {
+		return "", ErrDomainIsBlocked
 	}
 
+	// Запись URL в БД
+	sID, idx, conflictFlag, err := s.repo.Save(ctx, normalizedURL.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to persist data: %w", err)
+	}
+
+	// Генерируем короткий URL
 	sURL, err := model.MakeShortURL(sID, idx, &s.shortBaseURL.URL)
 	if err != nil {
-		slog.Warn("cannot make shortURL",
-			slog.Uint64("sID", uint64(sID)),
-			slog.Uint64("idx", idx),
-		)
-		return "", false, fmt.Errorf("failed to generate short URL: %w", err)
+		return "", fmt.Errorf("failed to generate short URL: %w", err)
 	}
 
-	slog.Info("URL shortened",
-		slog.Uint64("sID", uint64(sID)),
-		slog.Uint64("idx", idx),
-		slog.String("short_url", sURL),
-	)
+	if conflictFlag {
+		return sURL, fmt.Errorf("long URL %s already shortened to short URL %s: %w", normalizedURL.String(), sURL, ErrConflict)
+	}
 
-	return sURL, cf, errSave
+	return sURL, nil
 }
 
 func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
@@ -151,10 +151,10 @@ func (s *Service) Batch(ctx context.Context, e event.Event) (event.Event, error)
 	for i := range p {
 		normalizedURL, err := s.NormalizeURL(ctx, p[i].OrigURL)
 		if err != nil {
-			p[i].Err = errBadURLFormat
+			p[i].Err = ErrInvalidURLFormat.Error()
 			pRes = append(pRes, p[i])
 		} else {
-			p[i].OrigURL = normalizedURL
+			p[i].OrigURL = normalizedURL.String()
 			rBatch = append(rBatch, p[i])
 		}
 	}
@@ -180,7 +180,7 @@ func (s *Service) Batch(ctx context.Context, e event.Event) (event.Event, error)
 				slog.Uint64("sID", uint64(rBatch[i].ShardID)),
 				slog.Uint64("idx", rBatch[i].Idx),
 			)
-			rBatch[i].Err = errBadURLFormat
+			rBatch[i].Err = ErrInvalidURLFormat.Error()
 		} else {
 			rBatch[i].OrigURL = ""
 			rBatch[i].ShortURL = sURL

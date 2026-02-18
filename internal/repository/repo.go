@@ -71,9 +71,7 @@ func NewRepo(ctx context.Context, cfg RepoConfig) (*Repo, error) {
 			r.walFile = fh
 			r.wal = bufio.NewWriter(fh)
 		} else {
-			slog.Error("cannot open event storage file",
-				slog.Any("err", err),
-			)
+			return nil, fmt.Errorf("cannot open event storage file: %w", err)
 		}
 	}
 

@@ -64,7 +64,7 @@ func TestService_Batch(t *testing.T) {
 
 		var successCount, failCount int
 		for _, item := range resPayload {
-			if item.Err == errBadURLFormat {
+			if item.Err == ErrInvalidURLFormat.Error() {
 				failCount++
 			} else if item.ShortURL != "" {
 				successCount++
