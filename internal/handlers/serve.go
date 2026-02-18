@@ -23,12 +23,12 @@ type IServeConfig interface {
 // Интерфейс, в котором описаны методы объекта, необходимые
 // для конфигурирования Router'а
 type MicroURLHandlers interface {
-	HndlAPIShorten() http.HandlerFunc
-	HndlAPIShortenBatch() http.HandlerFunc
-	HndlAddURL() http.HandlerFunc
-	HndlGetURL() http.HandlerFunc
-	HndlDefault() http.HandlerFunc
-	HndlPing() http.HandlerFunc
+	APIShorten() http.HandlerFunc
+	APIShortenBatch() http.HandlerFunc
+	AddURL() http.HandlerFunc
+	GetURL() http.HandlerFunc
+	Default() http.HandlerFunc
+	Ping() http.HandlerFunc
 }
 
 // Фабрика роутеров
@@ -51,12 +51,12 @@ func NewRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	slog.Info("Used http.ServeMux router")
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/shorten", s.HndlAPIShorten())
-	mux.HandleFunc("POST /api/shorten/batch", s.HndlAPIShortenBatch())
-	mux.HandleFunc("POST /{$}", s.HndlAddURL())
-	mux.HandleFunc("GET /ping", s.HndlPing())
-	mux.HandleFunc("GET /{id}", s.HndlGetURL())
-	mux.HandleFunc("/", s.HndlDefault())
+	mux.HandleFunc("POST /api/shorten", s.APIShorten())
+	mux.HandleFunc("POST /api/shorten/batch", s.APIShortenBatch())
+	mux.HandleFunc("POST /{$}", s.AddURL())
+	mux.HandleFunc("GET /ping", s.Ping())
+	mux.HandleFunc("GET /{id}", s.GetURL())
+	mux.HandleFunc("/", s.Default())
 
 	// Middlewares
 	return middleware.WithLimiter(cfg)(
@@ -79,13 +79,13 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	r.Use(middleware.WithCompress(cfg))
 
 	// Routes
-	r.Post("/api/shorten", s.HndlAPIShorten())
-	r.Post("/api/shorten/batch", s.HndlAPIShortenBatch())
-	r.Post("/", s.HndlAddURL())
-	r.Get("/ping", s.HndlPing())
-	r.Get("/{id}", s.HndlGetURL())
-	r.NotFound(s.HndlDefault())
-	r.MethodNotAllowed(s.HndlDefault())
+	r.Post("/api/shorten", s.APIShorten())
+	r.Post("/api/shorten/batch", s.APIShortenBatch())
+	r.Post("/", s.AddURL())
+	r.Get("/ping", s.Ping())
+	r.Get("/{id}", s.GetURL())
+	r.NotFound(s.Default())
+	r.MethodNotAllowed(s.Default())
 
 	return r
 }

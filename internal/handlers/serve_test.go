@@ -16,22 +16,22 @@ type mockHandlers struct {
 	called bool
 }
 
-func (m *mockHandlers) HndlPing() http.HandlerFunc {
+func (m *mockHandlers) Ping() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
-func (m *mockHandlers) HndlAPIShorten() http.HandlerFunc {
+func (m *mockHandlers) APIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
-func (m *mockHandlers) HndlAddURL() http.HandlerFunc {
+func (m *mockHandlers) AddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
-func (m *mockHandlers) HndlGetURL() http.HandlerFunc {
+func (m *mockHandlers) GetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
-func (m *mockHandlers) HndlDefault() http.HandlerFunc {
+func (m *mockHandlers) Default() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
-func (m *mockHandlers) HndlAPIShortenBatch() http.HandlerFunc {
+func (m *mockHandlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
 

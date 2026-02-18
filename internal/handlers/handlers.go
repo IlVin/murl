@@ -74,7 +74,7 @@ func ErrHandling(err error, statusOK int) (int, error) {
 }
 
 // =========== POST / ==================
-func (h *Handlers) HndlAddURL() http.HandlerFunc {
+func (h *Handlers) AddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -127,7 +127,7 @@ type APIShortenResp struct {
 	Result string `json:"result"`
 }
 
-func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
+func (h *Handlers) APIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -162,7 +162,7 @@ func (h *Handlers) HndlAPIShorten() http.HandlerFunc {
 
 		longURL := jsReq.URL
 
-		slog.Info("HndlAPIShorten",
+		slog.Info("APIShorten",
 			slog.String("URL", longURL),
 		)
 		shortURL, err := h.service.AddURL(r.Context(), longURL)
@@ -254,7 +254,7 @@ func (h *Handlers) writePart(ctx context.Context, part event.PayloadBatch, w htt
 	return errors.Join(errs...)
 }
 
-func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
+func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -277,7 +277,7 @@ func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
 			return
 		}
 
-		slog.Info("HndlAPIShortenBatch")
+		slog.Info("APIShortenBatch")
 
 		part := make(event.PayloadBatch, 0, 1000)
 		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
@@ -338,7 +338,7 @@ func (h *Handlers) HndlAPIShortenBatch() http.HandlerFunc {
 }
 
 // =========== GET /{shortURL} ==================
-func (h *Handlers) HndlGetURL() http.HandlerFunc {
+func (h *Handlers) GetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := h.service.GetURL(r.Context(), r.URL.String())
 		if err != nil {
@@ -351,7 +351,7 @@ func (h *Handlers) HndlGetURL() http.HandlerFunc {
 }
 
 // =========== GET /ping ==================
-func (h *Handlers) HndlPing() http.HandlerFunc {
+func (h *Handlers) Ping() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := h.service.Ping(r.Context())
 
@@ -367,7 +367,7 @@ func (h *Handlers) HndlPing() http.HandlerFunc {
 }
 
 // =========== DEFAULT ==================
-func (h *Handlers) HndlDefault() http.HandlerFunc {
+func (h *Handlers) Default() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	}

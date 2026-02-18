@@ -18,7 +18,7 @@ import (
 // mockHandlersConfig для реализации интерфейса HandlersConfig
 type mockHandlersConfig struct{}
 
-func TestHandlers_HndlAddURL(t *testing.T) {
+func TestHandlers_AddURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -29,12 +29,12 @@ func TestHandlers_HndlAddURL(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		w := httptest.NewRecorder()
 
-		h.HndlAddURL()(w, req)
+		h.AddURL()(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 
-func TestHandlers_HndlAPIShortenBatch_Streaming(t *testing.T) {
+func TestHandlers_APIShortenBatch_Streaming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -66,7 +66,7 @@ func TestHandlers_HndlAPIShortenBatch_Streaming(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
-		h.HndlAPIShortenBatch()(w, req)
+		h.APIShortenBatch()(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
 
@@ -79,7 +79,7 @@ func TestHandlers_HndlAPIShortenBatch_Streaming(t *testing.T) {
 	})
 }
 
-func TestHandlers_HndlGetURL(t *testing.T) {
+func TestHandlers_GetURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -97,14 +97,14 @@ func TestHandlers_HndlGetURL(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, shortPath, nil)
 		w := httptest.NewRecorder()
 
-		h.HndlGetURL()(w, req)
+		h.GetURL()(w, req)
 
 		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
 		assert.Equal(t, targetURL, w.Header().Get("Location"))
 	})
 }
 
-func TestHandlers_HndlPing(t *testing.T) {
+func TestHandlers_Ping(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -117,7 +117,7 @@ func TestHandlers_HndlPing(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 		w := httptest.NewRecorder()
 
-		h.HndlPing()(w, req)
+		h.Ping()(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -127,7 +127,7 @@ func TestHandlers_HndlPing(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 		w := httptest.NewRecorder()
 
-		h.HndlPing()(w, req)
+		h.Ping()(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
