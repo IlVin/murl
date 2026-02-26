@@ -74,7 +74,7 @@ type Hashable interface {
 // Integer — все встроенные целые числа
 type Integer interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64
 }
 
 // ShardIDString для обычных строк (самый частый кейс)
@@ -128,7 +128,7 @@ func ShardID[T any](key T, clusterSz byte) byte {
 		return ShardIDStringer(v, clusterSz)
 
 	case int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64, uintptr:
+		uint, uint8, uint16, uint32, uint64:
 		return ShardIDInt(castToUint64(v), clusterSz)
 
 	default:
@@ -160,8 +160,6 @@ func castToUint64(v any) uint64 {
 		return uint64(i)
 	case uint64:
 		return i
-	case uintptr:
-		return uint64(i)
 	default:
 		return 0
 	}
