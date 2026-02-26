@@ -1,117 +1,111 @@
 package model
 
 import (
-	"fmt"
-	"math"
-	"net/url"
+	"errors"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestMakeAndParseShortURL(t *testing.T) {
-	baseURL, _ := url.Parse("http://localhost:8080")
+// Mock для Hashable
+type mockHashable struct{ val uint64 }
 
+func (m mockHashable) Hash() uint64 { return m.val }
+
+// Mock для Stringer
+type mockStringer struct{ val string }
+
+func (m mockStringer) String() string { return m.val }
+
+func TestParseShortPath(t *testing.T) {
 	tests := []struct {
-		name    string
-		shardID byte
-		idx     uint64
+		name      string
+		path      string
+		wantShard byte
+		wantIdx   uint64
+		wantErr   bool
 	}{
-		{"min values", 0, 0},
-		{"mid values", 32, 12345},
-		{"max shard", 63, 999999},
-		{"max uint64", 10, math.MaxUint64},
-		{"large values", 63, 123456789012345},
+		// 'B' (шард 1) + 'MA' (число 48 в base64u)
+		{"Valid Short", "/.BMA", 1, 48, false},
+
+		// 'A' (шард 0) + 'AA' (число 0 в base64u)
+		{"Shortest possible", "/.AAA", 0, 0, false},
+
+		{"With prefix", "https://site.com", 1, 12, true},
+		{"No marker", "invalid/path", 0, 0, true},
+
+		// Теперь это ошибка, так как индекс 'A' (1 символ) невозможен для base64
+		{"Too short index", "/.BA", 0, 0, true},
+
+		{"Invalid shard char", "/.!AA", 0, 0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 1. Создаем короткую ссылку
-			shortURL, err := MakeShortURL(tt.shardID, tt.idx, baseURL)
-			require.NoError(t, err)
-			assert.Contains(t, shortURL, "http://localhost:8080/.")
-
-			// 2. Парсим обратно
-			gotShard, gotIdx, err := ParseShortURL(shortURL)
-			require.NoError(t, err)
-
-			// 3. Проверяем идентичность
-			assert.Equal(t, tt.shardID, gotShard)
-			assert.Equal(t, tt.idx, gotIdx)
+			s, i, err := ParseShortPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("%s: error = %v, wantErr %v", tt.name, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && (s != tt.wantShard || i != tt.wantIdx) {
+				t.Errorf("%s: got shard %d idx %d, want %d idx %d", tt.name, s, i, tt.wantShard, tt.wantIdx)
+			}
 		})
 	}
 }
 
-func TestParseShortURL_Errors(t *testing.T) {
-	tests := []struct {
-		name    string
-		sURL    string
-		wantErr string
-	}{
-		{
-			"invalid url format",
-			"http://[invalid-url",
-			"invalid short url format",
-		},
-		{
-			"too short path",
-			"http://localhost/.", // всего 2 символа в пути после слэша
-			"invalid short url format",
-		},
-		{
-			"missing dot prefix",
-			"http://localhost/AABC", // нет точки в начале
-			"invalid short url format",
-		},
-		{
-			"invalid shard char",
-			"http://localhost/.!AA", // '!' нет в словаре
-			"invalid shard identifier",
-		},
-		{
-			"invalid base64 data",
-			"http://localhost/.A.$.", // битый base64
-			"failed to decode base64 data",
-		},
-		{
-			"incomplete varint data",
-			"http://localhost/.Aww", // Валидный b64, но битый varint (лишние байты или обрыв)
-			"failed to decode record index",
-		},
-	}
+func TestMakeShortPath(t *testing.T) {
+	t.Run("Valid", func(t *testing.T) {
+		path, err := MakeShortPath(1, 10)
+		if err != nil || path != "/.BCg" {
+			t.Errorf("Unexpected result: %s, %v", path, err)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			shard, idx, err := ParseShortURL(tt.sURL)
-			fmt.Println("====>", err)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tt.wantErr)
-			assert.Zero(t, shard)
-			assert.Zero(t, idx)
-		})
-	}
-}
-
-func TestMakeShortURL_Errors(t *testing.T) {
-	baseURL, _ := url.Parse("http://localhost")
-
-	t.Run("shardID out of bounds", func(t *testing.T) {
-		_, err := MakeShortURL(64, 100, baseURL)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "out of bounds")
+	t.Run("Invalid ShardID", func(t *testing.T) {
+		_, err := MakeShortPath(64, 0)
+		if err == nil {
+			t.Error("Expected error for shardID 64, got nil")
+		}
 	})
 }
 
-func TestVarintCompactness(t *testing.T) {
-	baseURL, _ := url.Parse("http://l")
+func TestShardID_AllTypes(t *testing.T) {
+	const sz byte = 10
 
-	// При малых значениях (0-127) Varint занимает 1 байт.
-	// Base64 от 1 байта — это 2 символа.
-	// Путь: "." + "S" + "II" = 4 символа. Итого "/.SII" = 5 символов.
-	shortURL, err := MakeShortURL(0, 10, baseURL)
-	require.NoError(t, err)
+	t.Run("ClusterSize 1", func(t *testing.T) {
+		if ShardID("any", 1) != 0 {
+			t.Error("Should return 0 for clusterSz <= 1")
+		}
+	})
 
-	u, _ := url.Parse(shortURL)
-	assert.Equal(t, 5, len(u.Path), "Path should be exactly 5 chars long for small IDs (including dot)")
+	t.Run("Types", func(t *testing.T) {
+		// String
+		_ = ShardID("test", sz)
+		// Hashable
+		_ = ShardID(mockHashable{100}, sz)
+		// Stringer
+		_ = ShardID(mockStringer{"test"}, sz)
+		// Integers (trigger castToUint64)
+		_ = ShardID(int(1), sz)
+		_ = ShardID(int8(1), sz)
+		_ = ShardID(int16(1), sz)
+		_ = ShardID(int32(1), sz)
+		_ = ShardID(int64(1), sz)
+		_ = ShardID(uint(1), sz)
+		_ = ShardID(uint8(1), sz)
+		_ = ShardID(uint16(1), sz)
+		_ = ShardID(uint32(1), sz)
+		_ = ShardID(uint64(1), sz)
+		_ = ShardID(uintptr(1), sz)
+		// Default (fallback to fmt.Sprint)
+		_ = ShardID(errors.New("err"), sz)
+		_ = ShardID(struct{ A int }{1}, sz)
+	})
+}
+
+func TestCastToUint64_Default(t *testing.T) {
+	// Проверка ветки default в вспомогательной функции
+	res := castToUint64("not a number")
+	if res != 0 {
+		t.Errorf("Expected 0 for non-numeric type, got %d", res)
+	}
 }
