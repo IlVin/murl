@@ -12,7 +12,6 @@ type EvType int32
 
 // !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
 //go:generate $GOPATH/bin/stringer -type=EvType
-//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=../../mocks/event_mocks.go -package=mocks
 
 // !!! [1] СЮДА ДОПИШИ НОВЫЙ ТИП КОНСТАНТЫ !!!
 // Возможные типы Event.
@@ -92,14 +91,15 @@ func (PayloadGetURLBySessionID) EventType() EvType { return EvGetURLBySessionID 
 //  ------------  /EvGetURLBySessionID  ------------
 
 // ------------  EvBatch  ------------
+type PayloadBatchItem struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url,omitempty"`
+	ShortURL      string `json:"short_url,omitempty"`
+	ConflictFlag  bool   `json:"-"`
+	Err           string `json:"err,omitempty"`
+}
 type PayloadBatch struct {
-	Batch []struct {
-		CorrelationID string `json:"correlation_id"`
-		OriginalURL   string `json:"original_url,omitempty"`
-		ShortURL      string `json:"short_url,omitempty"`
-		ConflictFlag  bool   `json:"-"`
-		Err           string `json:"err,omitempty"`
-	} `json:"batch"`
+	Batch []PayloadBatchItem `json:"batch"`
 }
 
 func (PayloadBatch) EventType() EvType { return EvBatch }
