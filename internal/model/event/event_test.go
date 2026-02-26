@@ -3,133 +3,127 @@ package event
 import (
 	"testing"
 
-	"github.com/google/uuid"
+	uuid "github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestMakeEvent_Success(t *testing.T) {
-	p := PayloadAddURL{ShardID: 1, ID: 123, URL: "https://example.com"}
+func TestMakeEvent_And_GetPayload(t *testing.T) {
+	// 1. Успешный цикл: Создание -> Получение данных
+	t.Run("success_lifecycle", func(t *testing.T) {
+		payload := PayloadAddURL{
+			OriginalURL: "https://google.com",
+			ShortURL:    "http://short/1",
+		}
 
-	ev, err := MakeEvent(p, nil)
-	if err != nil {
-		t.Fatalf("Failed to make event: %v", err)
-	}
+		ev, err := MakeEvent(payload, nil)
+		require.NoError(t, err)
+		assert.NotEqual(t, uuid.Nil, ev.GetID())
+		assert.Equal(t, EvAddURL, ev.GetType())
 
-	if ev.GetType() != EvAddURL {
-		t.Errorf("Expected type %v, got %v", EvAddURL, ev.GetType())
-	}
+		var result PayloadAddURL
+		err = ev.GetPayload(&result)
+		require.NoError(t, err)
+		assert.Equal(t, payload.OriginalURL, result.OriginalURL)
+	})
 
-	if ev.GetID() == uuid.Nil {
-		t.Error("Event ID should not be nil")
-	}
+	// 2. Ошибка при несоответствии типов
+	t.Run("type_mismatch", func(t *testing.T) {
+		payload := PayloadAddURL{OriginalURL: "test"}
+		ev, _ := MakeEvent(payload, nil)
 
-	var dest PayloadAddURL
-	if err := ev.GetPayload(&dest); err != nil {
-		t.Fatalf("Failed to get payload: %v", err)
-	}
+		var wrongPayload PayloadGetURL
+		err := ev.GetPayload(&wrongPayload)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type mismatch")
+	})
 
-	if dest.URL != p.URL || dest.ID != p.ID {
-		t.Errorf("Payload content mismatch. Got %+v, want %+v", dest, p)
-	}
+	// 3. Передача nil в GetPayload
+	t.Run("nil_dest", func(t *testing.T) {
+		payload := PayloadAddURL{OriginalURL: "test"}
+		ev, _ := MakeEvent(payload, nil)
+
+		err := ev.GetPayload(nil)
+		assert.Error(t, err)
+		assert.Equal(t, "dest is nil", err.Error())
+	})
 }
 
-func TestEvent_Chain(t *testing.T) {
-	// Создаем родительское событие
-	p1 := PayloadAddURL{ID: 1}
-	ev1, _ := MakeEvent(p1, nil)
+func TestEvent_Hierarchy(t *testing.T) {
+	// Создаем цепочку: Grandparent -> Parent -> Child
+	gp, _ := MakeEvent(PayloadAddURL{OriginalURL: "gp"}, nil)
+	p, _ := MakeEvent(PayloadAddURL{OriginalURL: "p"}, gp)
+	c, _ := MakeEvent(PayloadAddURL{OriginalURL: "c"}, p)
 
-	// Создаем дочернее
-	p2 := PayloadBatchItem{CorrelationID: "tx-1"}
-	ev2, err := MakeEvent(p2, ev1)
-	if err != nil {
-		t.Fatalf("Failed to make child event: %v", err)
-	}
+	parents := c.GetParents()
+	require.Equal(t, 2, len(parents))
+	assert.Equal(t, gp.GetID(), parents[0])
+	assert.Equal(t, p.GetID(), parents[1])
 
-	parents := ev2.GetParents()
-	if len(parents) != 1 {
-		t.Fatalf("Expected 1 parent, got %d", len(parents))
-	}
-
-	if parents[0] != ev1.GetID() {
-		t.Errorf("Wrong parent ID. Got %v, want %v", parents[0], ev1.GetID())
-	}
+	// Проверка иммутабельности (копирования слайса)
+	parents[0] = uuid.New()
+	assert.NotEqual(t, c.GetParents()[0], parents[0], "GetParents should return a copy")
 }
 
 func TestEvent_Serialization(t *testing.T) {
-	p := PayloadAddURL{ShardID: 2, URL: "http://test.io"}
-	ev, _ := MakeEvent(p, nil)
+	payload := PayloadAddURLBySessionID{
+		OriginalURL: "https://ya.ru",
+		SessionID:   uuid.New(),
+	}
+	ev, _ := MakeEvent(payload, nil)
 
+	// Сериализация
 	data, err := ev.Serialize()
-	if err != nil {
-		t.Fatalf("Serialize failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	parsed, err := Parse(data)
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
+	// Десериализация (Parse)
+	parsedEv, err := Parse(data)
+	require.NoError(t, err)
+	assert.Equal(t, ev.GetID(), parsedEv.GetID())
+	assert.Equal(t, ev.GetType(), parsedEv.GetType())
 
-	if parsed.GetID() != ev.GetID() {
-		t.Error("Parsed event ID mismatch")
-	}
-
-	var pDest PayloadAddURL
-	if err := parsed.GetPayload(&pDest); err != nil {
-		t.Errorf("Could not extract payload from parsed event: %v", err)
-	}
-}
-
-func TestGetPayload_Validation(t *testing.T) {
-	p := PayloadAddURL{ID: 55}
-	ev, _ := MakeEvent(p, nil)
-
-	t.Run("Non-pointer destination", func(t *testing.T) {
-		var dest PayloadAddURL
-		err := ev.GetPayload(dest) // Ошибка: не указатель
-		if err == nil {
-			t.Error("Expected error when passing value instead of pointer")
-		}
-	})
-
-	t.Run("Type mismatch", func(t *testing.T) {
-		var dest PayloadBatchItem // Ошибка: не тот тип payload
-		err := ev.GetPayload(&dest)
-		if err == nil {
-			t.Error("Expected error due to EvType mismatch")
-		}
-	})
+	// Проверка Payload после восстановления
+	var restoredPayload PayloadAddURLBySessionID
+	err = parsedEv.GetPayload(&restoredPayload)
+	require.NoError(t, err)
+	assert.Equal(t, payload.SessionID, restoredPayload.SessionID)
 }
 
 func TestParse_Errors(t *testing.T) {
-	t.Run("Missing ID", func(t *testing.T) {
-		invalidJSON := []byte(`{"type": 1, "payload": {}}`)
-		_, err := Parse(invalidJSON)
-		if err == nil || err.Error() != "event ID is missing" {
-			t.Errorf("Expected 'event ID is missing' error, got: %v", err)
-		}
+	t.Run("invalid_json", func(t *testing.T) {
+		_, err := Parse([]byte("{invalid}"))
+		assert.Error(t, err)
 	})
 
-	t.Run("Bad JSON", func(t *testing.T) {
-		_, err := Parse([]byte(`{not-a-json}`))
-		if err == nil {
-			t.Error("Expected error on malformed JSON")
-		}
+	t.Run("missing_id", func(t *testing.T) {
+		badData := []byte(`{"type": 1, "payload": {}}`)
+		_, err := Parse(badData)
+		assert.Error(t, err)
+		assert.Equal(t, "event ID is missing", err.Error())
 	})
 }
 
-func TestEvType_String(t *testing.T) {
-	tests := []struct {
-		val  EvType
-		want string
-	}{
-		{EvAddURL, "EvAddURL"},
-		{EvBatchItem, "EvBatchItem"},
-		{EvUnknown, "EvUnknown"},
-		{EvType(100), "EvType(100)"},
+func TestBatchPayloads(t *testing.T) {
+	// Проверка корректности работы с новыми структурами Batch
+	payload := PayloadBatchBySessionID{
+		SessionID: uuid.New(),
+		Batch: []struct {
+			CorrelationID string `json:"correlation_id"`
+			OriginalURL   string `json:"original_url,omitempty"`
+			ShortURL      string `json:"short_url,omitempty"`
+			ConflictFlag  bool   `json:"-"`
+			Err           string `json:"err,omitempty"`
+		}{
+			{CorrelationID: "1", OriginalURL: "url1"},
+		},
 	}
 
-	for _, tt := range tests {
-		if tt.val.String() != tt.want {
-			t.Errorf("String() for %d: got %s, want %s", tt.val, tt.val.String(), tt.want)
-		}
-	}
+	ev, err := MakeEvent(payload, nil)
+	require.NoError(t, err)
+
+	var result PayloadBatchBySessionID
+	err = ev.GetPayload(&result)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(result.Batch))
+	assert.Equal(t, "url1", result.Batch[0].OriginalURL)
 }

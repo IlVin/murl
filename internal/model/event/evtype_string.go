@@ -10,13 +10,16 @@ func _() {
 	var x [1]struct{}
 	_ = x[EvUnknown-0]
 	_ = x[EvAddURL-1]
-	_ = x[EvBatchItem-2]
-	_ = x[EvBatch-3]
+	_ = x[EvAddURLBySessionID-2]
+	_ = x[EvGetURL-3]
+	_ = x[EvGetURLBySessionID-4]
+	_ = x[EvBatch-5]
+	_ = x[EvBatchBySessionID-6]
 }
 
-const _EvType_name = "EvUnknownEvAddURLEvBatchItemEvBatch"
+const _EvType_name = "EvUnknownEvAddURLEvAddURLBySessionIDEvGetURLEvGetURLBySessionIDEvBatchEvBatchBySessionID"
 
-var _EvType_index = [...]uint8{0, 9, 17, 28, 35}
+var _EvType_index = [...]uint8{0, 9, 17, 36, 44, 63, 70, 88}
 
 func (i EvType) String() string {
 	idx := int(i) - 0

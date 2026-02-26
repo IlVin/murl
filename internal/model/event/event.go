@@ -12,14 +12,18 @@ type EvType int32
 
 // !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
 //go:generate $GOPATH/bin/stringer -type=EvType
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=../../mocks/event_mocks.go -package=mocks
 
 // !!! [1] СЮДА ДОПИШИ НОВЫЙ ТИП КОНСТАНТЫ !!!
 // Возможные типы Event.
 const (
 	EvUnknown EvType = iota
 	EvAddURL
-	EvBatchItem
+	EvAddURLBySessionID
+	EvGetURL
+	EvGetURLBySessionID
 	EvBatch
+	EvBatchBySessionID
 	// Добавляем сюда новый тип
 	// и создаем к нему соответствующий тип Payload
 )
@@ -42,9 +46,8 @@ type Payload interface {
 
 // ------------  EvAddURL  ------------
 type PayloadAddURL struct {
-	ShardID      byte   `json:"shard_id"`
-	ID           uint64 `json:"id"`
-	URL          string `json:"url"`
+	OriginalURL  string `json:"original_url"`
+	ShortURL     string `json:"short_url"`
 	ConflictFlag bool   `json:"-"`
 }
 
@@ -52,20 +55,70 @@ func (PayloadAddURL) EventType() EvType { return EvAddURL }
 
 //  ------------  /EvAddURL  ------------
 
-// ------------  EvBatch  ------------
-type PayloadBatch []PayloadBatchItem
-type PayloadBatchItem struct {
-	CorrelationID string `json:"correlation_id"`
-	OrigURL       string `json:"original_url,omitempty"`
-	ShortURL      string `json:"short_url,omitempty"`
-	ShardID       byte   `json:"-"`
-	Idx           uint64 `json:"-"`
-	ConflictFlag  bool   `json:"-"`
-	Err           string `json:"err,omitempty"`
+// ------------  EvAddURLBySessionID  ------------
+type PayloadAddURLBySessionID struct {
+	OriginalURL  string    `json:"original_url"`
+	ShortURL     string    `json:"short_url"`
+	SessionID    uuid.UUID `json:"session_id"`
+	ConflictFlag bool      `json:"-"`
 }
 
-func (PayloadBatch) EventType() EvType     { return EvBatch }
-func (PayloadBatchItem) EventType() EvType { return EvBatchItem }
+func (PayloadAddURLBySessionID) EventType() EvType { return EvAddURLBySessionID }
+
+//  ------------  /EvAddURLBySessionID  ------------
+
+// ------------  EvGetURL  ------------
+type PayloadGetURL struct {
+	OriginalURL  string `json:"original_url"`
+	ShortURL     string `json:"short_url"`
+	ConflictFlag bool   `json:"-"`
+}
+
+func (PayloadGetURL) EventType() EvType { return EvGetURL }
+
+//  ------------  /EvGetURL  ------------
+
+// ------------  EvGetURLBySessionID  ------------
+type PayloadGetURLBySessionID struct {
+	SessionID uuid.UUID `json:"session_id"`
+	Result    []struct {
+		OriginalURL string `json:"original_url"`
+		ShortURL    string `json:"short_url"`
+	} `json:"result"`
+}
+
+func (PayloadGetURLBySessionID) EventType() EvType { return EvGetURLBySessionID }
+
+//  ------------  /EvGetURLBySessionID  ------------
+
+// ------------  EvBatch  ------------
+type PayloadBatch struct {
+	Batch []struct {
+		CorrelationID string `json:"correlation_id"`
+		OriginalURL   string `json:"original_url,omitempty"`
+		ShortURL      string `json:"short_url,omitempty"`
+		ConflictFlag  bool   `json:"-"`
+		Err           string `json:"err,omitempty"`
+	} `json:"batch"`
+}
+
+func (PayloadBatch) EventType() EvType { return EvBatch }
+
+//  ------------  /EvBatch  ------------
+
+// ------------  EvBatchBySessionID  ------------
+type PayloadBatchBySessionID struct {
+	SessionID uuid.UUID `json:"session_id"`
+	Batch     []struct {
+		CorrelationID string `json:"correlation_id"`
+		OriginalURL   string `json:"original_url,omitempty"`
+		ShortURL      string `json:"short_url,omitempty"`
+		ConflictFlag  bool   `json:"-"`
+		Err           string `json:"err,omitempty"`
+	} `json:"batch"`
+}
+
+func (PayloadBatchBySessionID) EventType() EvType { return EvBatchBySessionID }
 
 //  ------------  /EvBatch  ------------
 
@@ -152,14 +205,17 @@ func (e *baseEvent) Serialize() ([]byte, error) {
 }
 
 func (e *baseEvent) GetPayload(dest any) error {
-	// Такого не может быть, но вдруг, как всегда?!...
+	if dest == nil {
+		return errors.New("dest is nil")
+	}
+
 	if len(e.evPayload) == 0 {
-		return fmt.Errorf("payload is nil")
+		return errors.New("payload is nil")
 	}
 
 	p, ok := dest.(Payload)
 	if !ok {
-		return fmt.Errorf("type mismatch: dest is not Payload type")
+		return errors.New("type mismatch: dest is not Payload type")
 	}
 
 	if p.EventType() != e.evType {
