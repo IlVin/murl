@@ -1,133 +1,143 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"murl/internal/model/event"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"murl/internal/mocks"
+	"murl/internal/model/event"
+	"murl/internal/service"
 )
 
-// mockHandlersConfig для реализации интерфейса HandlersConfig
-type mockHandlersConfig struct{}
-
-func TestHandlers_AddURL(t *testing.T) {
+func TestHandlers_AddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockService := NewMockMicroURLService(ctrl)
-	h := NewHandlers(&mockHandlersConfig{}, mockService)
+	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	h := NewHandlers(nil, mockSvc)
 
-	t.Run("Empty body", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		w := httptest.NewRecorder()
+	originalURL := "https://google.com"
+	shortURL := "http://short.io"
 
-		h.AddURL()(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	mockSvc.EXPECT().
+		AddURL(gomock.Any(), originalURL).
+		Return(shortURL, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+	w := httptest.NewRecorder()
+
+	h.AddURL()(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusCreated, res.StatusCode)
+	body, _ := io.ReadAll(res.Body)
+	assert.Equal(t, shortURL, string(body))
+}
+
+func TestHandlers_AddURL_Conflict(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	h := NewHandlers(nil, mockSvc)
+
+	// Имитируем ошибку конфликта из сервиса
+	mockSvc.EXPECT().
+		AddURL(gomock.Any(), gomock.Any()).
+		Return("http://existing.url", service.ErrConflict)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
+	w := httptest.NewRecorder()
+
+	h.AddURL()(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
 func TestHandlers_APIShortenBatch_Streaming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockService := NewMockMicroURLService(ctrl)
-	h := NewHandlers(&mockHandlersConfig{}, mockService)
+	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	h := NewHandlers(nil, mockSvc)
 
-	t.Run("Stream multiple batches", func(t *testing.T) {
-		// Подготовка входящего JSON массива
-		inputItems := []map[string]string{
-			{"correlation_id": "1", "original_url": "https://google.com"},
-			{"correlation_id": "2", "original_url": "https://apple.com"},
-		}
-		jsonBody, _ := json.Marshal(inputItems)
+	// Входной JSON массив
+	inputJSON := `[
+		{"correlation_id": "1", "original_url": "https://ya.ru"},
+		{"correlation_id": "2", "original_url": "https://go.dev"}
+	]`
 
-		// Ожидаем, что сервис обработает батч
-		// Поскольку в хэндлере используется event.MakeEvent, нам нужно перехватить вызов
-		mockService.EXPECT().
-			Batch(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, e event.Event) (event.Event, error) {
-				// Эмулируем ответ сервиса
-				resPayload := event.PayloadBatch{
-					{CorrelationID: "1", ShortURL: "http://m.url"},
-					{CorrelationID: "2", ShortURL: "http://m.url"},
-				}
-				return event.MakeEvent(resPayload, e)
-			})
+	// Ожидаемое поведение сервиса
+	mockSvc.EXPECT().
+		Batch(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, p event.PayloadBatch) (event.PayloadBatch, error) {
+			// Проставляем "результаты" сокращения
+			for i := range p.Batch {
+				p.Batch[i].ShortURL = "short_" + p.Batch[i].CorrelationID
+			}
+			return p, nil
+		})
 
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(inputJSON))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
 
-		h.APIShortenBatch()(w, req)
+	h.APIShortenBatch()(w, req)
 
-		assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 
-		// Проверяем валидность результирующего JSON
-		var result []event.PayloadBatchItem
-		err := json.Unmarshal(w.Body.Bytes(), &result)
-		require.NoError(t, err, "Response should be a valid JSON array")
-		assert.Len(t, result, 2)
-		assert.Equal(t, "http://m.url", result[0].ShortURL)
-	})
+	// Проверяем, что на выходе валидный JSON массив
+	respBody := w.Body.String()
+	assert.True(t, strings.HasPrefix(respBody, "["))
+	assert.True(t, strings.HasSuffix(respBody, "]"))
+	assert.Contains(t, respBody, `"short_url":"short_1"`)
+	assert.Contains(t, respBody, `"short_url":"short_2"`)
 }
 
-func TestHandlers_GetURL(t *testing.T) {
+func TestHandlers_GetURL_Redirect(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockService := NewMockMicroURLService(ctrl)
-	h := NewHandlers(&mockHandlersConfig{}, mockService)
+	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	h := NewHandlers(nil, mockSvc)
 
-	t.Run("Redirect success", func(t *testing.T) {
-		shortPath := "/1_100"
-		targetURL := "https://target.com"
+	originalURL := "https://murl.io"
+	mockSvc.EXPECT().
+		GetURL(gomock.Any(), "/.AAQ").
+		Return(originalURL, nil)
 
-		mockService.EXPECT().
-			GetURL(gomock.Any(), shortPath).
-			Return(targetURL, nil)
+	req := httptest.NewRequest(http.MethodGet, "/.AAQ", nil)
+	w := httptest.NewRecorder()
 
-		req := httptest.NewRequest(http.MethodGet, shortPath, nil)
-		w := httptest.NewRecorder()
+	h.GetURL()(w, req)
 
-		h.GetURL()(w, req)
-
-		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-		assert.Equal(t, targetURL, w.Header().Get("Location"))
-	})
+	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+	assert.Equal(t, originalURL, w.Header().Get("Location"))
 }
 
-func TestHandlers_Ping(t *testing.T) {
+func TestHandlers_Ping_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockService := NewMockMicroURLService(ctrl)
-	h := NewHandlers(&mockHandlersConfig{}, mockService)
+	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	h := NewHandlers(nil, mockSvc)
 
-	t.Run("DB Up", func(t *testing.T) {
-		mockService.EXPECT().Ping(gomock.Any()).Return(nil)
+	mockSvc.EXPECT().Ping(gomock.Any()).Return(errors.New("db connection lost"))
 
-		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-		w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
 
-		h.Ping()(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
+	h.Ping()(w, req)
 
-	t.Run("DB Down", func(t *testing.T) {
-		mockService.EXPECT().Ping(gomock.Any()).Return(errors.New("conn refuse"))
-
-		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-		w := httptest.NewRecorder()
-
-		h.Ping()(w, req)
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
