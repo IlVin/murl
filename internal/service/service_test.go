@@ -2,113 +2,147 @@ package service
 
 import (
 	"context"
-	"murl/internal/config"
-	"murl/internal/model"
-	"murl/internal/model/event"
 	"net/url"
 	"testing"
 
-	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"murl/internal/config"
+	"murl/internal/mocks"
+	"murl/internal/model/event"
 )
 
-type testServiceCfg struct {
-	base string
+// Вспомогательный мок конфига
+type mockSvcConfig struct {
+	baseURL string
 }
 
-func (c testServiceCfg) ShortBaseURL() config.ShortBaseURL {
-	u, _ := url.Parse(c.base)
+func (m *mockSvcConfig) ShortBaseURL() config.ShortBaseURL {
+	u, _ := url.Parse(m.baseURL)
 	return config.ShortBaseURL{URL: *u}
 }
 
-func TestService_Batch(t *testing.T) {
+func TestService_AddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := NewMockMicroURLRepo(ctrl)
-	cfg := testServiceCfg{base: "https://m.url"}
+	mockRepo := mocks.NewMockRepo(ctrl)
+	cfg := &mockSvcConfig{baseURL: "http://short.io"}
 	svc := NewService(context.Background(), cfg, mockRepo)
 
-	t.Run("Mixed valid and invalid URLs", func(t *testing.T) {
-		inputPayload := event.PayloadBatch{
-			{OrigURL: "https://google.com"}, // Валидный
-			{OrigURL: "ftp://wrong.com"},    // Ошибка (схема)
-		}
-		eInput, _ := event.MakeEvent(inputPayload, nil)
+	ctx := context.Background()
+	original := "https://google.com"
+	shortPath := "/.AAQ"
 
-		// Вместо MatchedBy используем DoAndReturn для ручной валидации аргументов
-		mockRepo.EXPECT().
-			Batch(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, p event.PayloadBatch) (event.PayloadBatch, error) {
-				// ПРОВЕРКА: Сервис должен был отфильтровать ftp и оставить только 1 элемент
-				assert.Len(t, p, 1, "Service should filter out invalid URLs before calling repo")
-				assert.Equal(t, "https://google.com", p[0].OrigURL)
+	// Ожидаем вызов Repo.On с событием AddURL
+	mockRepo.EXPECT().On(ctx, gomock.Any()).DoAndReturn(
+		func(ctx context.Context, e event.Event) (event.Event, error) {
+			p, _ := event.GetPayload[event.PayloadAddURL](e)
+			assert.Equal(t, original, p.OriginalURL)
 
-				// Возвращаем результат от лица БД
-				return event.PayloadBatch{
-					{OrigURL: "https://google.com", ShardID: 1, Idx: 77},
-				}, nil
-			})
+			// Возвращаем "обработанное" событие
+			p.ShortURL = shortPath
+			p.ConflictFlag = false
+			return event.MakeEvent(p, e)
+		})
 
-		// Ожидаем запись в WAL (PushEvent)
-		mockRepo.EXPECT().PushEvent(gomock.Any(), gomock.Any()).Times(1)
+	res, err := svc.AddURL(ctx, original)
 
-		resEvent, err := svc.Batch(context.Background(), eInput)
-		require.NoError(t, err)
+	require.NoError(t, err)
+	assert.Equal(t, "http://short.io/.AAQ", res)
+}
 
-		var resPayload event.PayloadBatch
-		resEvent.GetPayload(&resPayload)
+func TestService_NormalizeURL_Validation(t *testing.T) {
+	svc := &Service{}
+	ctx := context.Background()
 
-		assert.Len(t, resPayload, 2)
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"Valid HTTPS", "https://ya.ru", nil},
+		{"Valid HTTP", "http://ya.ru", nil},
+		{"No Scheme", "ya.ru", ErrInvalidURLFormat},
+		{"FTP Scheme", "ftp://ya.ru", ErrInvalidURLFormat},
+		{"Bad Format", "://bad", ErrInvalidURLFormat},
+	}
 
-		var successCount, failCount int
-		for _, item := range resPayload {
-			if item.Err == ErrInvalidURLFormat.Error() {
-				failCount++
-			} else if item.ShortURL != "" {
-				successCount++
-				// Проверяем, что ссылка собрана верно (Base + ID + Idx)
-				assert.Contains(t, item.ShortURL, "https://m.url")
-				sID, idx, _ := model.ParseShortURL(item.ShortURL)
-				assert.Equal(t, byte(1), sID)
-				assert.Equal(t, uint64(77), idx)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.NormalizeURL(ctx, tt.input)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
 			}
-		}
-		assert.Equal(t, 1, successCount)
-		assert.Equal(t, 1, failCount)
-	})
+		})
+	}
 }
 
-func TestService_GetURL(t *testing.T) {
+func TestService_AddURL_BlockedDomain(t *testing.T) {
+	cfg := &mockSvcConfig{baseURL: "http://murl.io"}
+	svc := NewService(context.Background(), cfg, nil)
+
+	// Попытка сократить ссылку на самого себя
+	_, err := svc.AddURL(context.Background(), "http://murl.io")
+	assert.ErrorIs(t, err, ErrDomainIsBlocked)
+}
+
+func TestService_GetURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := NewMockMicroURLRepo(ctrl)
-	svc := NewService(context.Background(), testServiceCfg{base: "http://m.url"}, mockRepo)
+	mockRepo := mocks.NewMockRepo(ctrl)
+	svc := &Service{repo: mockRepo}
 
-	t.Run("Valid retrieval", func(t *testing.T) {
-		// Подготовка тестовых данных через модель
-		base, _ := url.Parse("http://m.url")
-		sURL, _ := model.MakeShortURL(5, 999, base)
+	shortPath := "/.AAQ"
+	original := "https://github.com"
 
-		mockRepo.EXPECT().
-			Load(gomock.Any(), byte(5), uint64(999)).
-			Return("https://original.io", nil)
+	mockRepo.EXPECT().On(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, e event.Event) (event.Event, error) {
+			p, _ := event.GetPayload[event.PayloadGetURL](e)
+			assert.Equal(t, shortPath, p.ShortURL)
 
-		got, err := svc.GetURL(context.Background(), sURL)
-		require.NoError(t, err)
-		assert.Equal(t, "https://original.io", got)
-	})
+			p.OriginalURL = original
+			return event.MakeEvent(p, e)
+		})
+
+	res, err := svc.GetURL(context.Background(), shortPath)
+	assert.NoError(t, err)
+	assert.Equal(t, original, res)
 }
 
-func TestService_Ping(t *testing.T) {
+func TestService_Batch_PartialError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := NewMockMicroURLRepo(ctrl)
-	svc := NewService(context.Background(), testServiceCfg{}, mockRepo)
+	mockRepo := mocks.NewMockRepo(ctrl)
+	cfg := &mockSvcConfig{baseURL: "http://s.io"}
+	svc := NewService(context.Background(), cfg, mockRepo)
 
-	mockRepo.EXPECT().Ping(gomock.Any()).Return(nil)
-	assert.NoError(t, svc.Ping(context.Background()))
+	batch := event.PayloadBatch{
+		Batch: []event.PayloadBatchItem{
+			{OriginalURL: "https://ok.com"},
+			{OriginalURL: "not-a-url"}, // Ошибка нормализации
+		},
+	}
+
+	mockRepo.EXPECT().On(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, e event.Event) (event.Event, error) {
+			p, _ := event.GetPayload[event.PayloadBatch](e)
+			// Проверяем, что первая ссылка нормализована, а вторая получила ошибку
+			assert.NotEmpty(t, p.Batch[0].OriginalURL)
+			assert.Equal(t, ErrInvalidURLFormat.Error(), p.Batch[1].Err)
+
+			p.Batch[0].ShortURL = "/.OK"
+			return event.MakeEvent(p, e)
+		})
+
+	res, err := svc.Batch(context.Background(), batch)
+	assert.NoError(t, err)
+	assert.Equal(t, "http://s.io/.OK", res.Batch[0].ShortURL)
+	assert.Equal(t, ErrInvalidURLFormat.Error(), res.Batch[1].Err)
 }
