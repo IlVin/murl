@@ -33,11 +33,15 @@ type Event interface {
 	GetType() EvType
 	GetParents() []uuid.UUID
 	Serialize() ([]byte, error)
-	GetPayload(dest any) error
+	RawPayload() []byte
 }
 
 // ============  Типы Payload  ============
 type Payload interface {
+	PayloadAddURL | PayloadAddURLBySessionID |
+		PayloadGetURL | PayloadGetURLBySessionID |
+		PayloadBatch | PayloadBatchBySessionID
+
 	EventType() EvType
 }
 
@@ -47,7 +51,7 @@ type Payload interface {
 type PayloadAddURL struct {
 	OriginalURL  string `json:"original_url"`
 	ShortURL     string `json:"short_url"`
-	ConflictFlag bool   `json:"-"`
+	ConflictFlag bool   `json:"conflict_flag"`
 }
 
 func (PayloadAddURL) EventType() EvType { return EvAddURL }
@@ -59,7 +63,7 @@ type PayloadAddURLBySessionID struct {
 	OriginalURL  string    `json:"original_url"`
 	ShortURL     string    `json:"short_url"`
 	SessionID    uuid.UUID `json:"session_id"`
-	ConflictFlag bool      `json:"-"`
+	ConflictFlag bool      `json:"conflict_flag"`
 }
 
 func (PayloadAddURLBySessionID) EventType() EvType { return EvAddURLBySessionID }
@@ -68,9 +72,8 @@ func (PayloadAddURLBySessionID) EventType() EvType { return EvAddURLBySessionID 
 
 // ------------  EvGetURL  ------------
 type PayloadGetURL struct {
-	OriginalURL  string `json:"original_url"`
-	ShortURL     string `json:"short_url"`
-	ConflictFlag bool   `json:"-"`
+	OriginalURL string `json:"original_url"`
+	ShortURL    string `json:"short_url"`
 }
 
 func (PayloadGetURL) EventType() EvType { return EvGetURL }
@@ -108,14 +111,8 @@ func (PayloadBatch) EventType() EvType { return EvBatch }
 
 // ------------  EvBatchBySessionID  ------------
 type PayloadBatchBySessionID struct {
-	SessionID uuid.UUID `json:"session_id"`
-	Batch     []struct {
-		CorrelationID string `json:"correlation_id"`
-		OriginalURL   string `json:"original_url,omitempty"`
-		ShortURL      string `json:"short_url,omitempty"`
-		ConflictFlag  bool   `json:"-"`
-		Err           string `json:"err,omitempty"`
-	} `json:"batch"`
+	SessionID uuid.UUID          `json:"session_id"`
+	Batch     []PayloadBatchItem `json:"batch"`
 }
 
 func (PayloadBatchBySessionID) EventType() EvType { return EvBatchBySessionID }
@@ -126,15 +123,19 @@ func (PayloadBatchBySessionID) EventType() EvType { return EvBatchBySessionID }
 //  Здесь новый тип Event
 //  ------------  /EvNewType  ------------
 
-// Конструктор Event из Payload
-func MakeEvent(payload Payload, parentEvent Event) (Event, error) {
+// ============  Конструкторы (Generics)  ============
+// MakeEvent - Дженерик-конструктор
+func MakeEvent[T Payload](payload T, parentEvent Event) (Event, error) {
 	pData, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("cannot serialize payload (%v): %w", payload, err)
+		return nil, fmt.Errorf("cannot serialize: %w", err)
 	}
+
+	evType := any(payload).(interface{ EventType() EvType }).EventType()
+
 	e := &baseEvent{
 		evID:      uuid.New(),
-		evType:    payload.EventType(),
+		evType:    evType,
 		evPayload: pData,
 	}
 
@@ -145,12 +146,28 @@ func MakeEvent(payload Payload, parentEvent Event) (Event, error) {
 	return e, nil
 }
 
-// Конструктор Event из []byte
-func Parse(data []byte) (Event, error) {
-	env := serializeEnvelope{}
+// GetPayload - Дженерик-хелпер для извлечения данных из Event
+func GetPayload[T Payload](e Event) (T, error) {
+	var dest T
 
-	err := json.Unmarshal(data, &env)
-	if err != nil {
+	// Аналогично достаем тип для проверки
+	targetType := any(dest).(interface{ EventType() EvType }).EventType()
+
+	if e.GetType() != targetType {
+		return dest, fmt.Errorf("type mismatch: event has %v, target is %v", e.GetType(), targetType)
+	}
+
+	if err := json.Unmarshal(e.RawPayload(), &dest); err != nil {
+		return dest, fmt.Errorf("unmarshal failed: %w", err)
+	}
+
+	return dest, nil
+}
+
+// Parse - десериализация конверта из []byte
+func Parse(data []byte) (Event, error) {
+	var env serializeEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("cannot deserialize: %w", err)
 	}
 
@@ -166,6 +183,8 @@ func Parse(data []byte) (Event, error) {
 	}, nil
 }
 
+// ============  Внутренняя реализация  ============
+
 type baseEvent struct {
 	evParentID []uuid.UUID
 	evID       uuid.UUID
@@ -173,18 +192,11 @@ type baseEvent struct {
 	evPayload  json.RawMessage
 }
 
-func (e *baseEvent) GetID() uuid.UUID {
-	return e.evID
-}
-
-func (e *baseEvent) GetType() EvType {
-	return e.evType
-}
-
+func (e *baseEvent) GetID() uuid.UUID   { return e.evID }
+func (e *baseEvent) GetType() EvType    { return e.evType }
+func (e *baseEvent) RawPayload() []byte { return e.evPayload }
 func (e *baseEvent) GetParents() []uuid.UUID {
-	cp := make([]uuid.UUID, len(e.evParentID))
-	copy(cp, e.evParentID)
-	return cp
+	return append([]uuid.UUID(nil), e.evParentID...)
 }
 
 type serializeEnvelope struct {
@@ -195,32 +207,10 @@ type serializeEnvelope struct {
 }
 
 func (e *baseEvent) Serialize() ([]byte, error) {
-	env := serializeEnvelope{
+	return json.Marshal(serializeEnvelope{
 		ParentID: e.evParentID,
 		ID:       e.evID,
 		Type:     e.evType,
 		Payload:  e.evPayload,
-	}
-	return json.Marshal(&env)
-}
-
-func (e *baseEvent) GetPayload(dest any) error {
-	if dest == nil {
-		return errors.New("dest is nil")
-	}
-
-	if len(e.evPayload) == 0 {
-		return errors.New("payload is nil")
-	}
-
-	p, ok := dest.(Payload)
-	if !ok {
-		return errors.New("type mismatch: dest is not Payload type")
-	}
-
-	if p.EventType() != e.evType {
-		return fmt.Errorf("type mismatch: event has %v, dest has %v", e.evType, p.EventType())
-	}
-
-	return json.Unmarshal(e.evPayload, dest)
+	})
 }
