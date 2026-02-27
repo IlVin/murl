@@ -9,7 +9,6 @@ import (
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/pgc"
-	"murl/internal/repository/pgc/instance"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -51,9 +50,9 @@ func NewPgRepoLinks(cluster pgc.PgCluster) repository.RepoLinks {
 	}
 }
 
-// UpSert записывает longURL строку в шард БД и возвращает shortPath строку, признак конфликта и ошибку
-func (s *PgRepoLinks) UpSert(ctx context.Context, longURL string) (string, bool, error) {
-	shardID := s.cluster.ShardID(longURL)
+// UpSert записывает originalURL строку в шард БД и возвращает shortPath строку, признак конфликта и ошибку
+func (s *PgRepoLinks) UpSert(ctx context.Context, originalURL string) (string, bool, error) {
+	shardID := s.cluster.ShardID(originalURL)
 	shard, err := s.cluster.GetShard(shardID)
 	if err != nil {
 		return "", false, err
@@ -62,8 +61,8 @@ func (s *PgRepoLinks) UpSert(ctx context.Context, longURL string) (string, bool,
 	var idx uint64
 	var cf bool
 
-	errTx := shard.Tx(ctx, func(ctx context.Context, tx instance.PgxTxIface) error {
-		return tx.QueryRow(ctx, sqlUpSert, longURL).Scan(&idx, &cf)
+	errTx := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
+		return tx.QueryRow(ctx, sqlUpSert, originalURL).Scan(&idx, &cf)
 	})
 	if errTx != nil {
 		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, errTx)
@@ -75,7 +74,7 @@ func (s *PgRepoLinks) UpSert(ctx context.Context, longURL string) (string, bool,
 	return shortPath, cf, nil
 }
 
-// Select получить по shortPath строке longURL строку
+// Select получить по shortPath строке originalURL строку
 func (s *PgRepoLinks) Select(ctx context.Context, shortPath string) (string, error) {
 	shardID, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
@@ -87,18 +86,18 @@ func (s *PgRepoLinks) Select(ctx context.Context, shortPath string) (string, err
 		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, s.cluster.Size())
 	}
 
-	var longURL string
-	err = shard.PgPool(ctx, func(ctx context.Context, p instance.PgxPoolIface) error {
-		return p.QueryRow(ctx, sqlSelect, idx).Scan(&longURL)
+	var originalURL string
+	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
+		return p.QueryRow(ctx, sqlSelect, idx).Scan(&originalURL)
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to execute query (%s): %w", sqlSelect, err)
 	}
 
-	return longURL, nil
+	return originalURL, nil
 }
 
-func (s *PgRepoLinks) Set(ctx context.Context, longURL string, shortPath string) error {
+func (s *PgRepoLinks) Set(ctx context.Context, originalURL string, shortPath string) error {
 	shardID, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
 		return fmt.Errorf("invalid format shortPath: %w", err)
@@ -109,8 +108,8 @@ func (s *PgRepoLinks) Set(ctx context.Context, longURL string, shortPath string)
 		return fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, s.cluster.Size())
 	}
 
-	err = shard.PgPool(ctx, func(ctx context.Context, p instance.PgxPoolIface) error {
-		_, err = p.Exec(ctx, sqlSet, idx, longURL)
+	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
+		_, err = p.Exec(ctx, sqlSet, idx, originalURL)
 		return err
 	})
 	if err != nil {
@@ -127,10 +126,37 @@ type shardBatch struct {
 }
 
 func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch) event.PayloadBatch {
+	// Результат
+	result := event.PayloadBatch{
+		Batch: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
+	}
+
 	// Группируем элементы батча по шардам
 	byShardBatch := make(map[byte]*shardBatch)
 	for i := range batch.Batch {
-		sID := s.cluster.ShardID(batch.Batch[i].OriginalURL)
+		// Ошибки сразу складываем в результат
+		if len(batch.Batch[i].Err) > 0 {
+			result.Batch = append(result.Batch, batch.Batch[i])
+			continue
+		}
+		// Распределяем по шардам
+		var sID byte
+		var idx uint64
+		var err error
+		if len(batch.Batch[i].ShortURL) > 0 {
+			// Режим Set
+			sID, idx, err = model.ParseShortPath(batch.Batch[i].ShortURL)
+			if err != nil {
+				slog.Error("batch in mode 'Set' ShortPath parsing fail",
+					slog.Any("err", err),
+				)
+				continue
+			}
+		} else {
+			// Режим Add
+			sID = s.cluster.ShardID(batch.Batch[i].OriginalURL)
+		}
+
 		if byShardBatch[sID] == nil {
 			byShardBatch[sID] = &shardBatch{
 				batch: &pgx.Batch{},
@@ -138,7 +164,14 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 			}
 		}
 		byShardBatch[sID].items = append(byShardBatch[sID].items, batch.Batch[i])
-		byShardBatch[sID].batch.Queue(sqlUpSert, batch.Batch[i].OriginalURL)
+
+		if len(batch.Batch[i].ShortURL) > 0 {
+			// Режим Set
+			byShardBatch[sID].batch.Queue(sqlSet, idx, batch.Batch[i].OriginalURL)
+		} else {
+			// Режим Add
+			byShardBatch[sID].batch.Queue(sqlUpSert, batch.Batch[i].OriginalURL)
+		}
 	}
 
 	// Запускаем горутины
@@ -157,18 +190,20 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 					slog.Int("sID", int(sID)),
 				)
 				for i := range b.items {
-					if err := ctx.Err(); err != nil {
-						return
-					}
 					b.items[i].ShortURL = ""
 					b.items[i].ConflictFlag = false
 					b.items[i].Err = ErrInternalServerError.Error()
-					resCh <- b.items[i]
+					select {
+					case resCh <- b.items[i]:
+					case <-ctx.Done():
+						return
+					}
 				}
 				return
 			}
 
-			errPool := shard.Tx(ctx, func(ctx context.Context, tx instance.PgxTxIface) error {
+			// Выполняем batch запрос к БД
+			errPool := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
 				br := tx.SendBatch(ctx, b.batch)
 				defer br.Close()
 
@@ -189,7 +224,6 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 					b.items[i].ConflictFlag = cf
 					b.items[i].ShortURL = shortPath
 				}
-
 				return nil
 			})
 
@@ -212,7 +246,11 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 				if err := ctx.Err(); err != nil {
 					return
 				}
-				resCh <- b.items[i]
+				select {
+				case resCh <- b.items[i]:
+				case <-ctx.Done():
+					return
+				}
 			}
 
 		}(sID, b)
@@ -224,9 +262,6 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 		close(resCh)
 	}()
 
-	result := event.PayloadBatch{
-		Batch: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
-	}
 	for res := range resCh {
 		result.Batch = append(result.Batch, res)
 	}

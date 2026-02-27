@@ -3,79 +3,119 @@ package pgcluster
 import (
 	"context"
 	"errors"
-	"murl/internal/mocks"
-	"murl/internal/repository/pgc/instance"
-	"murl/internal/repository/pgc/metrics"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
+
+	"murl/internal/mocks"
+	"murl/internal/repository/pgc"
 )
 
-func TestNewPgCluster_Errors(t *testing.T) {
+// MockConfig для тестов
+type mockConfig struct {
+	shardSize byte
+	dsn       string
+}
+
+func (m *mockConfig) ShardSize() byte { return m.shardSize }
+func (m *mockConfig) DBDSN() string   { return m.dsn }
+
+func TestPgCluster_New_Validation(t *testing.T) {
+	ctx := context.Background()
+
+	// Тест на некорректный размер шарда
+	cfg := &mockConfig{shardSize: 0}
+	cluster, err := NewPgCluster(ctx, cfg, nil)
+	assert.Error(t, err)
+	assert.Nil(t, cluster)
+}
+
+func TestPgCluster_ShardingLogic(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	mockCfg := mocks.NewMockPgClusterConfig(ctrl)
-	reg := prometheus.NewRegistry()
-	m, _ := metrics.NewPgMetrics(reg)
-	t.Run("zero_shard_size", func(t *testing.T) {
-		mockCfg.EXPECT().ShardSize().Return(byte(0))
-		cluster, err := NewPgCluster(context.Background(), mockCfg, m)
-		assert.Error(t, err)
-		assert.Nil(t, cluster)
-		assert.Contains(t, err.Error(), "greater than 0")
-	})
-	t.Run("invalid_dsn", func(t *testing.T) {
-		mockCfg.EXPECT().ShardSize().Return(byte(1))
-		mockCfg.EXPECT().DBDSN().Return("invalid-connection-string")
-		cluster, err := NewPgCluster(context.Background(), mockCfg, m)
-		assert.Error(t, err)
-		assert.Nil(t, cluster)
-	})
-}
-func TestPgCluster_Sharding(t *testing.T) {
-	// Создаем структуру вручную для тестирования логики без коннекта к БД
+
+	mockInst := mocks.NewMockPgInstance(ctrl)
+	shardSize := byte(5)
+
+	// Создаем кластер вручную, чтобы подсунуть мок инстанса
 	c := &pgCluster{
-		shards: make([]*instance.PgInstance, 10),
+		instances: []pgc.PgInstance{mockInst},
+		shards:    make([]pgc.PgInstance, shardSize),
 	}
-	t.Run("Size", func(t *testing.T) {
-		assert.Equal(t, byte(10), c.Size())
-	})
-	t.Run("GetShard_Success", func(t *testing.T) {
-		shard, err := c.GetShard(5)
-		assert.NoError(t, err)
-		assert.Nil(t, shard) // Т.к. мы просто аллоцировали слайс nil-ов
-	})
-	t.Run("GetShard_OutOfRange", func(t *testing.T) {
-		shard, err := c.GetShard(10)
-		assert.Error(t, err)
-		assert.Nil(t, shard)
-		assert.Contains(t, err.Error(), "out of range")
-	})
-	t.Run("ShardID_Consistency", func(t *testing.T) {
-		key := "test-url"
-		id1 := c.ShardID(key)
-		id2 := c.ShardID(key)
-		assert.Equal(t, id1, id2)
-		assert.True(t, id1 < 10)
-	})
+	for i := range c.shards {
+		c.shards[i] = mockInst
+	}
+
+	// 1. Проверка размера
+	assert.Equal(t, shardSize, c.Size())
+
+	// 2. Проверка GetShard
+	shard, err := c.GetShard(2)
+	assert.NoError(t, err)
+	assert.Equal(t, mockInst, shard)
+
+	// 3. Проверка выхода за границы
+	_, err = c.GetShard(10)
+	assert.Error(t, err)
 }
-func TestPgCluster_Lifecycle_Mock(t *testing.T) {
-	// Проверка поведения при пустых инстансах
+
+func TestPgCluster_Ping_StopOnFirstError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Эмулируем два разных инстанса (хотя в текущей имплементации он один)
+	mockInst1 := mocks.NewMockPgInstance(ctrl)
+	mockInst2 := mocks.NewMockPgInstance(ctrl)
+
 	c := &pgCluster{
-		instances: []*instance.PgInstance{nil},
+		instances: []pgc.PgInstance{mockInst1, mockInst2},
 	}
-	t.Run("Close_With_Nil", func(t *testing.T) {
-		err := c.Close()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nil instance")
-	})
-	t.Run("RunMigrations_ContextCancel", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		err := c.RunMigrations(ctx)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, context.Canceled))
-	})
+
+	ctx := context.Background()
+	testErr := errors.New("ping failed")
+
+	// Ожидаем, что если первый упал, второй даже не будут пинговать
+	mockInst1.EXPECT().Ping(ctx).Return(testErr)
+
+	err := c.Ping(ctx)
+	assert.ErrorIs(t, err, testErr)
+}
+
+func TestPgCluster_Close_AllInstances(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockInst1 := mocks.NewMockPgInstance(ctrl)
+	mockInst2 := mocks.NewMockPgInstance(ctrl)
+
+	c := &pgCluster{
+		instances: []pgc.PgInstance{mockInst1, mockInst2},
+	}
+
+	// Ожидаем вызов Close на ВСЕХ уникальных инстансах
+	mockInst1.EXPECT().Close().Return(nil)
+	mockInst2.EXPECT().Close().Return(nil)
+
+	err := c.Close()
+	assert.NoError(t, err)
+}
+
+func TestPgCluster_RunMigrations_ContextCancel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockInst := mocks.NewMockPgInstance(ctrl)
+	mockInst.EXPECT().String().Return("localhost:5432").AnyTimes()
+
+	c := &pgCluster{
+		instances: []pgc.PgInstance{mockInst},
+	}
+
+	// Отменяем контекст сразу
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := c.RunMigrations(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
 }

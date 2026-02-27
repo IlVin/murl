@@ -13,8 +13,8 @@ import (
 
 // pgCluster
 type pgCluster struct {
-	instances []*instance.PgInstance
-	shards    []*instance.PgInstance
+	instances []pgc.PgInstance
+	shards    []pgc.PgInstance
 }
 
 // NewPgCluster конструктор пула шардов
@@ -25,8 +25,8 @@ func NewPgCluster(ctx context.Context, cfg pgc.PgClusterConfig, metrics *metrics
 	}
 
 	c := &pgCluster{
-		instances: make([]*instance.PgInstance, 0, 1),
-		shards:    make([]*instance.PgInstance, 0, shardSize),
+		instances: make([]pgc.PgInstance, 0, 1),
+		shards:    make([]pgc.PgInstance, 0, shardSize),
 	}
 
 	// В БД на текущий момент шардирования нет,
@@ -89,7 +89,7 @@ func (c *pgCluster) RunMigrations(ctx context.Context) error {
 }
 
 // GetShard возвращает PgInstance указанного шарда
-func (c *pgCluster) GetShard(shardID byte) (*instance.PgInstance, error) {
+func (c *pgCluster) GetShard(shardID byte) (pgc.PgInstance, error) {
 	if shardID >= c.Size() {
 		return nil, fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, c.Size())
 	}

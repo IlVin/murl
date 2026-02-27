@@ -2,7 +2,6 @@ package pgc
 
 import (
 	"context"
-	"murl/internal/repository/pgc/instance"
 )
 
 // PgClusterConfig интерфейс конфига для пула шардов
@@ -24,7 +23,7 @@ type PgCluster interface {
 	RunMigrations(ctx context.Context) error
 
 	// GetShard возвращает PgInstance указанного шарда
-	GetShard(shardID byte) (*instance.PgInstance, error)
+	GetShard(shardID byte) (PgInstance, error)
 
 	// Ping последовательно пингует все шарды пула. Возвращает первую ошибку.
 	Ping(ctx context.Context) error
