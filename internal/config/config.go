@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"time"
 )
 
 // +--------------------------+
@@ -23,6 +24,8 @@ type Config struct {
 	dbConfigPath             string
 	dbDSN                    string
 	maxBodySize              int64
+	jwtSecretKey             string
+	jwtTTL                   time.Duration
 }
 
 type LookupEnvFunc func(key string) (string, bool)
@@ -52,6 +55,8 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		dbConfigPath:     "",
 		dbDSN:            "",
 		maxBodySize:      1024 * 1024,
+		jwtSecretKey:     "jwtSecretKey+jwtSecretKey-jwtSecretKey+jwtSecretKey-jwtSecretKey",
+		jwtTTL:           30 * 24 * time.Hour,
 	}
 
 	// Command line arguments
@@ -127,6 +132,22 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		cfg = cfg.SetRepoDrv("PgDB")
 	}
 	return cfg, nil
+}
+
+func (c Config) JWTTTL() time.Duration {
+	return c.jwtTTL
+}
+func (c Config) SetJWTTTL(jwtTTL time.Duration) Config {
+	c.jwtTTL = jwtTTL
+	return c
+}
+
+func (c Config) JWTSecretKey() string {
+	return c.jwtSecretKey
+}
+func (c Config) SetJWTSecretKey(jwtSecretKey string) Config {
+	c.jwtSecretKey = jwtSecretKey
+	return c
 }
 
 func (c Config) MaxBodySize() int64 {
