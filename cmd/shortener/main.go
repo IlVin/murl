@@ -8,7 +8,7 @@ import (
 
 	"murl/internal/config"
 	"murl/internal/handlers"
-	"murl/internal/repository"
+	"murl/internal/repository/repo"
 	"murl/internal/service"
 
 	"github.com/joho/godotenv"
@@ -46,7 +46,7 @@ func run() error {
 	)
 
 	// Репозиторий
-	repo, err := repository.NewRepo(ctx, cfg)
+	repo, err := repo.NewRepo(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize the repository object: %w", err)
 	}

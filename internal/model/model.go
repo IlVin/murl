@@ -5,9 +5,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/google/uuid"
 )
+
+type Session struct {
+	ID  uuid.UUID `json:"id"`
+	TTL time.Time `json:"ttl"`
+}
 
 const shortPathMarker = "/."
 
