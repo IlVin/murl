@@ -11,7 +11,7 @@ package mocks
 
 import (
 	context "context"
-	instance "murl/internal/repository/pgc/instance"
+	pgc "murl/internal/repository/pgc"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -108,10 +108,10 @@ func (mr *MockPgClusterMockRecorder) Close() *gomock.Call {
 }
 
 // GetShard mocks base method.
-func (m *MockPgCluster) GetShard(shardID byte) (*instance.PgInstance, error) {
+func (m *MockPgCluster) GetShard(shardID byte) (pgc.PgInstance, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetShard", shardID)
-	ret0, _ := ret[0].(*instance.PgInstance)
+	ret0, _ := ret[0].(pgc.PgInstance)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
