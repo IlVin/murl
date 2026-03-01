@@ -34,6 +34,9 @@ func (m *mockHandlers) Default() http.HandlerFunc {
 func (m *mockHandlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
 }
+func (m *mockHandlers) APIUserURLs() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { m.called = true }
+}
 
 // mockServeCfg для теста функции Serve
 type mockServeCfg struct {

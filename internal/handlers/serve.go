@@ -26,6 +26,7 @@ type IServeConfig interface {
 type MicroURLHandlers interface {
 	APIShorten() http.HandlerFunc
 	APIShortenBatch() http.HandlerFunc
+	APIUserURLs() http.HandlerFunc
 	AddURL() http.HandlerFunc
 	GetURL() http.HandlerFunc
 	Default() http.HandlerFunc
@@ -54,6 +55,7 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", s.APIShorten())
 	mux.HandleFunc("POST /api/shorten/batch", s.APIShortenBatch())
+	mux.HandleFunc("GET /api/user/urls", s.APIUserURLs())
 	mux.HandleFunc("POST /{$}", s.AddURL())
 	mux.HandleFunc("GET /ping", s.Ping())
 	mux.HandleFunc("GET /{id}", s.GetURL())
@@ -85,6 +87,7 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	// Routes
 	r.Post("/api/shorten", s.APIShorten())
 	r.Post("/api/shorten/batch", s.APIShortenBatch())
+	r.Get("/api/user/urls", s.APIUserURLs())
 	r.Post("/", s.AddURL())
 	r.Get("/ping", s.Ping())
 	r.Get("/{id}", s.GetURL())

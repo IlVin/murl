@@ -6,9 +6,6 @@ import (
 	"murl/internal/model/event"
 )
 
-//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=mocks/repo_mocks.go -package=mocks
-//go:generate $GOPATH/bin/mockgen                 -destination=mocks/pgx_mocks.go  -package=mocks github.com/jackc/pgx/v5 Tx,Row,BatchResults
-
 var ErrInternalServerError = errors.New("internal server error")
 
 // Объявляем список используемых параметров конфига

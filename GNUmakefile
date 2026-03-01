@@ -118,3 +118,6 @@ iter12:
 
 iter13:
 	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration13$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'
+
+iter14:
+	${WORKDIR}/cmd/tests/shortenertest_v2 -test.v -test.run=^TestIteration14$$ -binary-path=${BINARY_NAME} -source-path=${WORKDIR}/internal -server-port=8080 -file-storage-path=./storage.json -database-dsn='postgres://murl:murl_pswd@localhost:5530/murl_00'

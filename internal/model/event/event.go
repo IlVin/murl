@@ -81,12 +81,14 @@ func (PayloadGetURL) EventType() EvType { return EvGetURL }
 //  ------------  /EvGetURL  ------------
 
 // ------------  EvGetURLBySessionID  ------------
+type PayloadURLItem struct {
+	CorrelationID string `json:"correlation_id,omitempty"`
+	OriginalURL   string `json:"original_url,omitempty"`
+	ShortURL      string `json:"short_url,omitempty"`
+}
 type PayloadGetURLBySessionID struct {
-	SessionID uuid.UUID `json:"session_id"`
-	Result    []struct {
-		OriginalURL string `json:"original_url"`
-		ShortURL    string `json:"short_url"`
-	} `json:"result"`
+	SessionID uuid.UUID        `json:"session_id,omitempty"`
+	Result    []PayloadURLItem `json:"result,omitempty"`
 }
 
 func (PayloadGetURLBySessionID) EventType() EvType { return EvGetURLBySessionID }

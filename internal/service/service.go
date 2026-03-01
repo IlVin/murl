@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"murl/internal/config"
+	"murl/internal/handlers/middleware"
+	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"net/url"
@@ -15,6 +17,7 @@ var ErrInvalidURLFormat = errors.New("invalid URL format")
 var ErrDomainIsBlocked = errors.New("domain is blocked")
 var ErrConflict = errors.New("URL is already shortened")
 var ErrQuotaReached = errors.New("quota reached")
+var ErrNoContent = errors.New("no content")
 
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
@@ -59,6 +62,36 @@ func (s *Service) NormalizeURL(ctx context.Context, originalURL string) (*url.UR
 	return u, nil
 }
 
+func (s *Service) GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error) {
+	e, err := event.MakeEvent(event.PayloadGetURLBySessionID{SessionID: session.ID}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("make EvGetURLBySessionID fail: %w", err)
+	}
+
+	res, err := s.repo.On(ctx, e)
+	if err != nil {
+		return nil, fmt.Errorf("on EvGetURLBySessionID fail: %w", err)
+	}
+
+	p, err := event.GetPayload[event.PayloadGetURLBySessionID](res)
+	if err != nil {
+		return nil, fmt.Errorf("fetch PayloadGetURLBySessionID fail: %w", err)
+	}
+
+	// Конвертируем ShortPath в ShortURL
+	u := s.shortBaseURL.URL
+	for i := range p.Result {
+		u.Path = p.Result[i].ShortURL
+		p.Result[i].ShortURL = u.String()
+	}
+
+	if len(p.Result) == 0 {
+		return &p, ErrNoContent
+	}
+
+	return &p, nil
+}
+
 func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error) {
 	// Нормализация URL
 	normalizedURL, err := s.NormalizeURL(ctx, originalURL)
@@ -72,7 +105,25 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 	}
 
 	// Запись URL в БД
-	e, err := event.MakeEvent(event.PayloadAddURL{OriginalURL: normalizedURL.String()}, nil)
+	var e event.Event
+	var session model.Session
+	var sessionMode bool
+	if session, sessionMode = middleware.GetSession(ctx); sessionMode {
+		e, err = event.MakeEvent(
+			event.PayloadAddURLBySessionID{
+				OriginalURL: normalizedURL.String(),
+				SessionID:   session.ID,
+			},
+			nil,
+		)
+	} else {
+		e, err = event.MakeEvent(
+			event.PayloadAddURL{
+				OriginalURL: normalizedURL.String(),
+			},
+			nil,
+		)
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to persist data: %w", err)
 	}
@@ -82,21 +133,31 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 		return "", fmt.Errorf("failed to persist data: %w", err)
 	}
 
-	p, err := event.GetPayload[event.PayloadAddURL](resEvent)
-	if err != nil {
-		return "", fmt.Errorf("failed to persist data: %w", err)
+	u := s.shortBaseURL.URL
+	var conflictFlag bool
+	if sessionMode {
+		p, err := event.GetPayload[event.PayloadAddURLBySessionID](resEvent)
+		if err != nil {
+			return "", fmt.Errorf("failed to persist data: %w", err)
+		}
+		u.Path = p.ShortURL
+		conflictFlag = p.ConflictFlag
+	} else {
+		p, err := event.GetPayload[event.PayloadAddURL](resEvent)
+		if err != nil {
+			return "", fmt.Errorf("failed to persist data: %w", err)
+		}
+		u.Path = p.ShortURL
+		conflictFlag = p.ConflictFlag
 	}
 
-	u := s.shortBaseURL.URL
-	u.Path = p.ShortURL
-
 	slog.Info("service.AddURL",
-		slog.String("original_url", p.OriginalURL),
+		slog.String("original_url", originalURL),
 		slog.String("short_url", u.String()),
-		slog.Bool("conflict_flag", p.ConflictFlag),
+		slog.Bool("conflict_flag", conflictFlag),
 	)
 
-	if p.ConflictFlag {
+	if conflictFlag {
 		return u.String(), fmt.Errorf("original URL %s already shortened to short URL %s: %w", normalizedURL, u.String(), ErrConflict)
 	}
 

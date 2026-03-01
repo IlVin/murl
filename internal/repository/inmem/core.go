@@ -20,13 +20,14 @@ type InMemConfig interface {
 }
 
 type InMemShard struct {
-	_       sync.Locker // фиктивный интерфейс для go vet
-	Mu      sync.RWMutex
-	_       cpu.CacheLinePad
-	Data    map[uint64]string
-	Index   map[string]uint64
-	LastIdx uint64
-	_       cpu.CacheLinePad
+	_        sync.Locker // фиктивный интерфейс для go vet
+	Mu       sync.RWMutex
+	_        cpu.CacheLinePad
+	Data     map[uint64]string
+	Index    map[string]uint64
+	Sessions map[string][]uint64
+	LastIdx  uint64
+	_        cpu.CacheLinePad
 }
 
 type InMemCore struct {
@@ -46,6 +47,7 @@ func NewInMemCore(cfg InMemConfig) (*InMemCore, error) {
 	for i := 0; i < shardSize; i++ {
 		s.shards[i].Data = make(map[uint64]string, defaultCap)
 		s.shards[i].Index = make(map[string]uint64, defaultCap)
+		s.shards[i].Sessions = make(map[string][]uint64, defaultCap)
 	}
 
 	return s, nil

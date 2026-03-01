@@ -11,6 +11,7 @@ package mocks
 
 import (
 	context "context"
+	model "murl/internal/model"
 	event "murl/internal/model/event"
 	reflect "reflect"
 
@@ -108,6 +109,21 @@ func (m *MockMicroURLService) GetURL(ctx context.Context, url string) (string, e
 func (mr *MockMicroURLServiceMockRecorder) GetURL(ctx, url any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURL", reflect.TypeOf((*MockMicroURLService)(nil).GetURL), ctx, url)
+}
+
+// GetURLBySessionID mocks base method.
+func (m *MockMicroURLService) GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetURLBySessionID", ctx, session)
+	ret0, _ := ret[0].(*event.PayloadGetURLBySessionID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetURLBySessionID indicates an expected call of GetURLBySessionID.
+func (mr *MockMicroURLServiceMockRecorder) GetURLBySessionID(ctx, session any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURLBySessionID", reflect.TypeOf((*MockMicroURLService)(nil).GetURLBySessionID), ctx, session)
 }
 
 // Ping mocks base method.

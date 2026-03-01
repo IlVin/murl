@@ -97,8 +97,6 @@ func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 					}
 					setSessionCookie(w, token, session.TTL)
 				}
-
-				setSessionCookie(w, token, session.TTL)
 			}
 
 			// 3. Передача в контекст
