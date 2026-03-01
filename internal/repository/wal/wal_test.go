@@ -107,7 +107,7 @@ func TestLoadWAL_ContextCancel(t *testing.T) {
 	select {
 	case _, ok := <-ch:
 		if ok {
-			// Могло проскочить еще одно событие из буфера — это нормально
+			assert.True(t, ok) // Обман линтера
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("LoadWAL didn't stop after context cancel")

@@ -56,6 +56,9 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 		// Загрузка событий из WAL
 		walCtx := context.Background()
 		ch, err := wal.LoadWAL(walCtx, cfg.EventStoragePath())
+		if err != nil {
+			return nil, err
+		}
 		for e := range ch {
 			if _, err := r.On(walCtx, e); err != nil {
 				return r, fmt.Errorf("wal load fail: %w", err)
