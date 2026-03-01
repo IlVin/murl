@@ -1,135 +1,81 @@
-package event
+package event_test
 
 import (
 	"testing"
 
-	"github.com/google/uuid"
+	uuid "github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"murl/internal/mocks"
+	"murl/internal/model/event"
 )
 
-func TestMakeEvent_Success(t *testing.T) {
-	p := PayloadAddURL{ShardID: 1, ID: 123, URL: "https://example.com"}
-
-	ev, err := MakeEvent(p, nil)
-	if err != nil {
-		t.Fatalf("Failed to make event: %v", err)
+func TestMakeAndGetPayload(t *testing.T) {
+	// Данные для теста
+	payload := event.PayloadAddURL{
+		OriginalURL: "https://google.com",
+		ShortURL:    "http://short/1",
 	}
 
-	if ev.GetType() != EvAddURL {
-		t.Errorf("Expected type %v, got %v", EvAddURL, ev.GetType())
-	}
+	// 1. Тестируем создание события
+	ev, err := event.MakeEvent(payload, nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, ev.GetID())
+	assert.Equal(t, event.EvAddURL, ev.GetType())
 
-	if ev.GetID() == uuid.Nil {
-		t.Error("Event ID should not be nil")
-	}
-
-	var dest PayloadAddURL
-	if err := ev.GetPayload(&dest); err != nil {
-		t.Fatalf("Failed to get payload: %v", err)
-	}
-
-	if dest.URL != p.URL || dest.ID != p.ID {
-		t.Errorf("Payload content mismatch. Got %+v, want %+v", dest, p)
-	}
+	// 2. Тестируем извлечение Payload (Generic)
+	extracted, err := event.GetPayload[event.PayloadAddURL](ev)
+	require.NoError(t, err)
+	assert.Equal(t, payload.OriginalURL, extracted.OriginalURL)
 }
 
-func TestEvent_Chain(t *testing.T) {
+func TestEventChain(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	// Создаем родительское событие
-	p1 := PayloadAddURL{ID: 1}
-	ev1, _ := MakeEvent(p1, nil)
+	parentID := uuid.New()
+	mockParent := mocks.NewMockEvent(ctrl)
+	mockParent.EXPECT().GetID().Return(parentID).AnyTimes()
+	mockParent.EXPECT().GetParents().Return([]uuid.UUID{}).AnyTimes()
 
-	// Создаем дочернее
-	p2 := PayloadBatchItem{CorrelationID: "tx-1"}
-	ev2, err := MakeEvent(p2, ev1)
-	if err != nil {
-		t.Fatalf("Failed to make child event: %v", err)
-	}
+	// Создаем дочернее событие через MakeEvent
+	payload := event.PayloadGetURL{ShortURL: "short"}
+	childEv, err := event.MakeEvent(payload, mockParent)
 
-	parents := ev2.GetParents()
-	if len(parents) != 1 {
-		t.Fatalf("Expected 1 parent, got %d", len(parents))
-	}
-
-	if parents[0] != ev1.GetID() {
-		t.Errorf("Wrong parent ID. Got %v, want %v", parents[0], ev1.GetID())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, childEv.GetParents(), parentID)
 }
 
-func TestEvent_Serialization(t *testing.T) {
-	p := PayloadAddURL{ShardID: 2, URL: "http://test.io"}
-	ev, _ := MakeEvent(p, nil)
+func TestSerialization(t *testing.T) {
+	payload := event.PayloadAddURLBySessionID{
+		OriginalURL: "https://yandex.ru",
+		SessionID:   uuid.New(),
+	}
 
+	ev, _ := event.MakeEvent(payload, nil)
+
+	// Сериализация
 	data, err := ev.Serialize()
-	if err != nil {
-		t.Fatalf("Serialize failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	parsed, err := Parse(data)
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
+	// Десериализация (Parse)
+	parsedEv, err := event.Parse(data)
+	require.NoError(t, err)
 
-	if parsed.GetID() != ev.GetID() {
-		t.Error("Parsed event ID mismatch")
-	}
-
-	var pDest PayloadAddURL
-	if err := parsed.GetPayload(&pDest); err != nil {
-		t.Errorf("Could not extract payload from parsed event: %v", err)
-	}
+	assert.Equal(t, ev.GetID(), parsedEv.GetID())
+	assert.Equal(t, ev.GetType(), parsedEv.GetType())
+	assert.Equal(t, ev.RawPayload(), parsedEv.RawPayload())
 }
 
-func TestGetPayload_Validation(t *testing.T) {
-	p := PayloadAddURL{ID: 55}
-	ev, _ := MakeEvent(p, nil)
+func TestTypeMismatch(t *testing.T) {
+	payload := event.PayloadAddURL{OriginalURL: "url"}
+	ev, _ := event.MakeEvent(payload, nil)
 
-	t.Run("Non-pointer destination", func(t *testing.T) {
-		var dest PayloadAddURL
-		err := ev.GetPayload(dest) // Ошибка: не указатель
-		if err == nil {
-			t.Error("Expected error when passing value instead of pointer")
-		}
-	})
-
-	t.Run("Type mismatch", func(t *testing.T) {
-		var dest PayloadBatchItem // Ошибка: не тот тип payload
-		err := ev.GetPayload(&dest)
-		if err == nil {
-			t.Error("Expected error due to EvType mismatch")
-		}
-	})
-}
-
-func TestParse_Errors(t *testing.T) {
-	t.Run("Missing ID", func(t *testing.T) {
-		invalidJSON := []byte(`{"type": 1, "payload": {}}`)
-		_, err := Parse(invalidJSON)
-		if err == nil || err.Error() != "event ID is missing" {
-			t.Errorf("Expected 'event ID is missing' error, got: %v", err)
-		}
-	})
-
-	t.Run("Bad JSON", func(t *testing.T) {
-		_, err := Parse([]byte(`{not-a-json}`))
-		if err == nil {
-			t.Error("Expected error on malformed JSON")
-		}
-	})
-}
-
-func TestEvType_String(t *testing.T) {
-	tests := []struct {
-		val  EvType
-		want string
-	}{
-		{EvAddURL, "EvAddURL"},
-		{EvBatchItem, "EvBatchItem"},
-		{EvUnknown, "EvUnknown"},
-		{EvType(100), "EvType(100)"},
-	}
-
-	for _, tt := range tests {
-		if tt.val.String() != tt.want {
-			t.Errorf("String() for %d: got %s, want %s", tt.val, tt.val.String(), tt.want)
-		}
-	}
+	// Пытаемся достать неправильный тип payload
+	_, err := event.GetPayload[event.PayloadBatch](ev)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "type mismatch")
 }

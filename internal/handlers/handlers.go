@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"murl/internal/handlers/middleware"
+	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/service"
 	"net/http"
@@ -15,8 +17,6 @@ import (
 	"github.com/bcicen/jstream"
 )
 
-//go:generate mockgen -source=$GOFILE -destination=handlers_mocks_test.go -package=$GOPACKAGE
-
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
 }
@@ -24,8 +24,9 @@ type HandlersConfig interface {
 // Эти методы сервиса используются хэндлерами
 type MicroURLService interface {
 	AddURL(ctx context.Context, url string) (string, error)
-	Batch(ctx context.Context, e event.Event) (event.Event, error)
+	Batch(ctx context.Context, e event.PayloadBatch) (event.PayloadBatch, error)
 	GetURL(ctx context.Context, url string) (string, error)
+	GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error)
 	Ping(ctx context.Context) error
 }
 
@@ -68,6 +69,8 @@ func ErrHandling(err error, statusOK int) (int, error) {
 		return http.StatusTooManyRequests, err
 	} else if errors.Is(err, service.ErrConflict) {
 		return http.StatusConflict, nil
+	} else if errors.Is(err, service.ErrNoContent) {
+		return http.StatusNoContent, nil
 	}
 
 	return http.StatusInternalServerError, err
@@ -87,14 +90,14 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 			return
 		}
 
-		longURL := string(buf)
-		shortURL, err := h.service.AddURL(r.Context(), longURL)
+		originalURL := string(buf)
+		shortURL, err := h.service.AddURL(r.Context(), originalURL)
 
 		httpStatus, err := ErrHandling(err, http.StatusCreated)
 
 		if err != nil {
 			slog.Warn("service cannot add URL",
-				slog.String("URL", longURL),
+				slog.String("URL", originalURL),
 				slog.Any("err", err),
 			)
 			w.WriteHeader(httpStatus)
@@ -102,7 +105,7 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 		}
 
 		slog.Info("URL shortened",
-			slog.String("long_url", longURL),
+			slog.String("original_url", originalURL),
 			slog.String("short_url", shortURL),
 		)
 
@@ -111,6 +114,54 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 
 		if _, err := w.Write([]byte(shortURL)); err != nil {
 			slog.Warn("failed to write response",
+				slog.String("event", "network_error"),
+				slog.Any("err", err),
+			)
+		}
+	}
+}
+
+// =========== GET /api/user/urls ==================
+func (h *Handlers) APIUserURLs() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, ok := middleware.GetSession(r.Context())
+		if !ok {
+			slog.Warn("APIUserURLs unauthorized request")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		slog.Info("APIUserURLs",
+			slog.Bool("hasSession", ok),
+		)
+
+		URLs, err := h.service.GetURLBySessionID(r.Context(), session)
+		httpStatus, err := ErrHandling(err, http.StatusOK)
+
+		if err != nil {
+			slog.Warn("service cannot GetURLBySessionID",
+				slog.String("sessionID", session.ID.String()),
+				slog.Any("err", err),
+			)
+			w.WriteHeader(httpStatus)
+			return
+		}
+
+		data, err := json.Marshal(URLs.Result)
+		if err != nil {
+			slog.Error("failed to encode response",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		slog.Info("APIUserURLs",
+			slog.String("JSON", string(data)),
+		)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(httpStatus)
+
+		if _, err := w.Write(data); err != nil {
+			slog.Debug("failed to write response",
 				slog.String("event", "network_error"),
 				slog.Any("err", err),
 			)
@@ -208,32 +259,23 @@ func (h *Handlers) APIShorten() http.HandlerFunc {
 const partSize int = 1000
 
 func (h *Handlers) writePart(ctx context.Context, part event.PayloadBatch, w http.ResponseWriter, isFirst *bool) error {
-	// Создаем событие
-	e, err := event.MakeEvent(part, nil)
-	if err != nil {
-		return fmt.Errorf("internal error: %w", err)
-	}
-
-	// Просим сервис обработать событие
-	rEv, err := h.service.Batch(ctx, e)
+	// Просим сервис обработать batch
+	p, err := h.service.Batch(ctx, part)
 	if err != nil {
 		return fmt.Errorf("save to storage failed: %w", err)
 	}
 
-	// Вынимаем ответ из события
-	p := event.PayloadBatch{}
-	if err := rEv.GetPayload(&p); err != nil {
-		return fmt.Errorf("event unmarshaling failed: %w", err)
-	}
-
 	// Выводим результат
 	errs := []error{}
-	for i := range p {
-		b, err := json.Marshal(p[i])
+	for i := range p.Batch {
+		b, err := json.Marshal(p.Batch[i])
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
+		slog.Info("batch item",
+			slog.String("b", string(b)),
+		)
 
 		if *isFirst {
 			if _, err := w.Write([]byte("\n")); err != nil {
@@ -279,7 +321,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 
 		slog.Info("APIShortenBatch")
 
-		part := make(event.PayloadBatch, 0, 1000)
+		part := make([]event.PayloadBatchItem, 0, 1000)
 		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
 		for mv := range decoder.Stream() {
 			v, ok := mv.Value.(map[string]interface{})
@@ -298,7 +340,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 				continue
 			} else if p.CorrelationID, ok = cID.(string); !ok {
 				continue
-			} else if p.OrigURL, ok = oURL.(string); !ok {
+			} else if p.OriginalURL, ok = oURL.(string); !ok {
 				continue
 			}
 
@@ -307,7 +349,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 
 			// Если набралось чуток
 			if len(part) >= partSize {
-				if err := h.writePart(r.Context(), part, w, &isFirst); err != nil {
+				if err := h.writePart(r.Context(), event.PayloadBatch{Batch: part}, w, &isFirst); err != nil {
 					slog.Error("internal error",
 						slog.Any("err", err),
 					)
@@ -320,7 +362,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 		}
 		// Если осталось чуток
 		if len(part) > 0 {
-			if err := h.writePart(r.Context(), part, w, &isFirst); err != nil {
+			if err := h.writePart(r.Context(), event.PayloadBatch{Batch: part}, w, &isFirst); err != nil {
 				slog.Error("internal error",
 					slog.Any("err", err),
 				)
