@@ -96,6 +96,20 @@ func (mr *MockMicroURLServiceMockRecorder) Batch(ctx, e any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Batch", reflect.TypeOf((*MockMicroURLService)(nil).Batch), ctx, e)
 }
 
+// DeleteURLBySessionID mocks base method.
+func (m *MockMicroURLService) DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteURLBySessionID", ctx, session, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteURLBySessionID indicates an expected call of DeleteURLBySessionID.
+func (mr *MockMicroURLServiceMockRecorder) DeleteURLBySessionID(ctx, session, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteURLBySessionID", reflect.TypeOf((*MockMicroURLService)(nil).DeleteURLBySessionID), ctx, session, data)
+}
+
 // GetURL mocks base method.
 func (m *MockMicroURLService) GetURL(ctx context.Context, url string) (string, error) {
 	m.ctrl.T.Helper()

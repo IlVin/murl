@@ -56,12 +56,13 @@ func (mr *MockRepoLinksMockRecorder) BatchUpSert(ctx, batch any) *gomock.Call {
 }
 
 // Select mocks base method.
-func (m *MockRepoLinks) Select(ctx context.Context, shortPath string) (string, error) {
+func (m *MockRepoLinks) Select(ctx context.Context, shortPath string) (string, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Select", ctx, shortPath)
 	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // Select indicates an expected call of Select.

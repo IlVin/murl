@@ -2,7 +2,9 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/inmem"
@@ -98,6 +100,8 @@ func (r *repo) On(ctx context.Context, e event.Event) (event.Event, error) {
 		return r.evAddURL(ctx, e)
 	case event.EvAddURLBySessionID:
 		return r.evAddURLBySessionID(ctx, e)
+	case event.EvDeleteURLBySessionID:
+		return r.evDeleteURLBySessionID(ctx, e)
 	case event.EvGetURL:
 		return r.evGetURL(ctx, e)
 	case event.EvGetURLBySessionID:
@@ -187,6 +191,31 @@ func (r *repo) evAddURLBySessionID(ctx context.Context, e event.Event) (resEvent
 	return resEvent, nil
 }
 
+// evDeleteURL добавляет URL в БД шардируя по SessionID
+func (r *repo) evDeleteURLBySessionID(ctx context.Context, e event.Event) (resEvent event.Event, err error) {
+	// Парсинг события и проверка типа события
+	p, err := event.GetPayload[event.PayloadDeleteURLBySessionID](e)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("repo.evDeleteURLBySessionID",
+		slog.Any("payload", p),
+		slog.Any("pg_cluster", r.pgCluster),
+	)
+
+	// Отложенное удаление реализовано только для Pg
+	if r.pgCluster == nil {
+		return nil, errors.New("DeleteURLBySessionID is not implemented")
+	}
+
+	if err := r.repoLinksBySessionID.BatchDelBySessionID(ctx, p.SessionID.String(), p); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
 // evGetURL считывает OriginURL по ShortPath из БД
 func (r *repo) evGetURL(ctx context.Context, e event.Event) (event.Event, error) {
 	// Парсинг события и проверка типа события
@@ -195,12 +224,13 @@ func (r *repo) evGetURL(ctx context.Context, e event.Event) (event.Event, error)
 		return nil, err
 	}
 
-	originalURL, err := r.repoLinks.Select(ctx, p.ShortURL)
+	originalURL, deleted, err := r.repoLinks.Select(ctx, p.ShortURL)
 	if err != nil {
 		return nil, err
 	}
 
 	p.OriginalURL = originalURL
+	p.IsGone = deleted
 
 	return event.MakeEvent(p, e)
 }

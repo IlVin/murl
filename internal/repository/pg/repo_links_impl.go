@@ -33,7 +33,7 @@ const sqlSet string = `
 	DO UPDATE SET url = EXCLUDED.url;
 `
 const sqlSelect string = `
-	SELECT url FROM murl
+	SELECT url, deleted FROM murl
 	WHERE id = $1
 	LIMIT 1;
 `
@@ -75,26 +75,27 @@ func (s *PgRepoLinks) UpSert(ctx context.Context, originalURL string) (string, b
 }
 
 // Select получить по shortPath строке originalURL строку
-func (s *PgRepoLinks) Select(ctx context.Context, shortPath string) (string, error) {
+func (s *PgRepoLinks) Select(ctx context.Context, shortPath string) (string, bool, error) {
 	shardID, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid format shortPath: %w", err)
+		return "", false, fmt.Errorf("invalid format shortPath: %w", err)
 	}
 
 	shard, err := s.cluster.GetShard(shardID)
 	if err != nil {
-		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, s.cluster.Size())
+		return "", false, fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, s.cluster.Size())
 	}
 
 	var originalURL string
+	var deleted bool
 	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
-		return p.QueryRow(ctx, sqlSelect, idx).Scan(&originalURL)
+		return p.QueryRow(ctx, sqlSelect, idx).Scan(&originalURL, &deleted)
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to execute query (%s): %w", sqlSelect, err)
+		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlSelect, err)
 	}
 
-	return originalURL, nil
+	return originalURL, deleted, nil
 }
 
 func (s *PgRepoLinks) Set(ctx context.Context, originalURL string, shortPath string) error {

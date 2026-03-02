@@ -15,6 +15,6 @@ type RepoLinksBySessionID interface {
 	// SelectAll получить по sessionID строке все URL в формате [{"short_url": "http://...","original_url": "http://..."},...]
 	SelectAll(ctx context.Context, sessionID string) ([]event.PayloadURLItem, error)
 
-	// // BatchUpSert пакетная установка URL
-	// BatchUpSert(ctx context.Context, sessionID string, batch event.PayloadBatch) event.PayloadBatch
+	// BatchDelBySessionID пакетное удаление URL
+	BatchDelBySessionID(ctx context.Context, sessionID string, batch event.PayloadDeleteURLBySessionID) error
 }

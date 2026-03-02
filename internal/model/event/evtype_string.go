@@ -13,13 +13,14 @@ func _() {
 	_ = x[EvAddURLBySessionID-2]
 	_ = x[EvGetURL-3]
 	_ = x[EvGetURLBySessionID-4]
-	_ = x[EvBatch-5]
-	_ = x[EvBatchBySessionID-6]
+	_ = x[EvDeleteURLBySessionID-5]
+	_ = x[EvBatch-6]
+	_ = x[EvBatchBySessionID-7]
 }
 
-const _EvType_name = "EvUnknownEvAddURLEvAddURLBySessionIDEvGetURLEvGetURLBySessionIDEvBatchEvBatchBySessionID"
+const _EvType_name = "EvUnknownEvAddURLEvAddURLBySessionIDEvGetURLEvGetURLBySessionIDEvDeleteURLBySessionIDEvBatchEvBatchBySessionID"
 
-var _EvType_index = [...]uint8{0, 9, 17, 36, 44, 63, 70, 88}
+var _EvType_index = [...]uint8{0, 9, 17, 36, 44, 63, 85, 92, 110}
 
 func (i EvType) String() string {
 	idx := int(i) - 0

@@ -150,6 +150,12 @@ func (r *InMemRepoLinksBySessionID) Set(ctx context.Context, sessionID string, o
 	return nil
 }
 
+// BatchDeleteBySessionID - Создает отложенный батч на удаление URL по SessionID
+func (s *InMemRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessionID string, batch event.PayloadDeleteURLBySessionID) error {
+	slog.Error("BatchDelBySessionID is not implemented")
+	return nil
+}
+
 // BatchUpSert пакетная установка URL
 func (r *InMemRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID string, b event.PayloadBatch) event.PayloadBatch {
 	for i := range b.Batch {

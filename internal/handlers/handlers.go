@@ -28,6 +28,7 @@ type MicroURLService interface {
 	GetURL(ctx context.Context, url string) (string, error)
 	GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error)
 	Ping(ctx context.Context) error
+	DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error
 }
 
 type Handlers struct {
@@ -71,6 +72,8 @@ func ErrHandling(err error, statusOK int) (int, error) {
 		return http.StatusConflict, nil
 	} else if errors.Is(err, service.ErrNoContent) {
 		return http.StatusNoContent, nil
+	} else if errors.Is(err, service.ErrGone) {
+		return http.StatusGone, nil
 	}
 
 	return http.StatusInternalServerError, err
@@ -166,6 +169,50 @@ func (h *Handlers) APIUserURLs() http.HandlerFunc {
 				slog.Any("err", err),
 			)
 		}
+	}
+}
+
+// =========== DELETE /api/user/urls ==================
+func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, ok := middleware.GetSession(r.Context())
+		if !ok {
+			slog.Warn("APIUserURLs unauthorized request")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		slog.Info("APIUserURLs",
+			slog.Bool("hasSession", ok),
+			slog.Any("session", session),
+		)
+
+		defer r.Body.Close()
+
+		buf, err := readBody(r)
+		if err != nil {
+			slog.Error("request body validation failed",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		var data []string = make([]string, 0, 100)
+		err = json.Unmarshal(buf, &data)
+		if err != nil {
+			slog.Error("request body validation failed",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		if err := h.service.DeleteURLBySessionID(r.Context(), session, data); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
@@ -383,12 +430,14 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 func (h *Handlers) GetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := h.service.GetURL(r.Context(), r.URL.String())
+		httpStatus, err := ErrHandling(err, http.StatusTemporaryRedirect)
+
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Location", u)
-		w.WriteHeader(http.StatusTemporaryRedirect)
+		w.WriteHeader(httpStatus)
 	}
 }
 

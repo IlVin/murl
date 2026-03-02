@@ -119,6 +119,21 @@ func (mr *MockPgClusterMockRecorder) Flush() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockPgCluster)(nil).Flush))
 }
 
+// GetBatch mocks base method.
+func (m *MockPgCluster) GetBatch(shardID byte) (pgc.BatchExec, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBatch", shardID)
+	ret0, _ := ret[0].(pgc.BatchExec)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBatch indicates an expected call of GetBatch.
+func (mr *MockPgClusterMockRecorder) GetBatch(shardID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBatch", reflect.TypeOf((*MockPgCluster)(nil).GetBatch), shardID)
+}
+
 // GetShard mocks base method.
 func (m *MockPgCluster) GetShard(shardID byte) (pgc.PgInstance, error) {
 	m.ctrl.T.Helper()

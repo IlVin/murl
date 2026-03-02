@@ -61,25 +61,25 @@ func (r *InMemRepoLinks) UpSert(ctx context.Context, originalURL string) (string
 }
 
 // Select получить по shortPath строке originalURL строку
-func (r *InMemRepoLinks) Select(ctx context.Context, shortPath string) (string, error) {
+func (r *InMemRepoLinks) Select(ctx context.Context, shortPath string) (string, bool, error) {
 	shardID, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid format shortPath: %w", err)
+		return "", false, fmt.Errorf("invalid format shortPath: %w", err)
 	}
 
 	shard, err := r.c.GetShard(shardID)
 	if err != nil {
-		return "", fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, r.c.Size())
+		return "", false, fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, r.c.Size())
 	}
 
 	shard.Mu.RLock()
 	defer shard.Mu.RUnlock()
 
 	if originalURL, ok := shard.Data[idx]; ok {
-		return originalURL, nil
+		return originalURL, false, nil
 	}
 
-	return "", fmt.Errorf("record not found: %d", idx)
+	return "", false, fmt.Errorf("record not found: %d", idx)
 }
 
 // Set установить жесткое соответствие originalURL -> shortPath

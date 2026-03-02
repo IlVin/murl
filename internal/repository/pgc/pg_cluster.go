@@ -25,6 +25,9 @@ type PgCluster interface {
 	// GetShard возвращает PgInstance указанного шарда
 	GetShard(shardID byte) (PgInstance, error)
 
+	// GetBatch возвращает BatchExec указанного шарда
+	GetBatch(shardID byte) (BatchExec, error)
+
 	// Ping последовательно пингует все шарды пула. Возвращает первую ошибку.
 	Ping(ctx context.Context) error
 

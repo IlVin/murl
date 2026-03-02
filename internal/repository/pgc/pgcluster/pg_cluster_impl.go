@@ -9,6 +9,7 @@ import (
 	"murl/internal/repository/pgc"
 	"murl/internal/repository/pgc/instance"
 	"murl/internal/repository/pgc/metrics"
+	"murl/internal/repository/pgc/pgbatch"
 	"sync"
 )
 
@@ -17,7 +18,7 @@ type pgCluster struct {
 	batchLimiter chan bool
 	batchWg      *sync.WaitGroup
 	instances    []pgc.PgInstance
-	batchers     []*instance.BatchExec
+	batchers     []pgc.BatchExec
 	shards       []pgc.PgInstance
 }
 
@@ -32,7 +33,7 @@ func NewPgCluster(ctx context.Context, cfg pgc.PgClusterConfig, metrics *metrics
 		batchLimiter: make(chan bool, 3),
 		batchWg:      &sync.WaitGroup{},
 		instances:    make([]pgc.PgInstance, 0, 1),
-		batchers:     make([]*instance.BatchExec, 0, shardSize),
+		batchers:     make([]pgc.BatchExec, 0, shardSize),
 		shards:       make([]pgc.PgInstance, 0, shardSize),
 	}
 
@@ -55,7 +56,7 @@ func NewPgCluster(ctx context.Context, cfg pgc.PgClusterConfig, metrics *metrics
 
 	// Инициализация батчеров
 	for i := 0; i < shardSize; i++ {
-		c.batchers = append(c.batchers, instance.NewBatchExec(
+		c.batchers = append(c.batchers, pgbatch.NewBatchExec(
 			c.shards[i],
 			c.batchLimiter,
 			c.batchWg,
@@ -122,6 +123,14 @@ func (c *pgCluster) GetShard(shardID byte) (pgc.PgInstance, error) {
 		return nil, fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, c.Size())
 	}
 	return c.shards[shardID], nil
+}
+
+// GetBatch возвращает BatchExec указанного шарда
+func (c *pgCluster) GetBatch(shardID byte) (pgc.BatchExec, error) {
+	if shardID >= c.Size() {
+		return nil, fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, c.Size())
+	}
+	return c.batchers[shardID], nil
 }
 
 // Ping последовательно пингует все шарды пула. Возвращает первую ошибку.

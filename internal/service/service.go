@@ -18,6 +18,7 @@ var ErrDomainIsBlocked = errors.New("domain is blocked")
 var ErrConflict = errors.New("URL is already shortened")
 var ErrQuotaReached = errors.New("quota reached")
 var ErrNoContent = errors.New("no content")
+var ErrGone = errors.New("gone")
 
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
@@ -60,6 +61,31 @@ func (s *Service) NormalizeURL(ctx context.Context, originalURL string) (*url.UR
 	}
 
 	return u, nil
+}
+
+func (s *Service) DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error {
+	shortURLs := make([]string, 0, len(data))
+	for i := range data {
+		shortURLs = append(shortURLs, "/"+data[i])
+	}
+	e, err := event.MakeEvent(event.PayloadDeleteURLBySessionID{
+		SessionID: session.ID,
+		ShortURLs: shortURLs,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("make EvDeleteURLBySessionID fail: %w", err)
+	}
+
+	slog.Info("service.DeleteURLBySessionID",
+		slog.Any("sessionID", session.ID),
+		slog.Any("shortURLs", shortURLs),
+	)
+
+	if _, err := s.repo.On(ctx, e); err != nil {
+		return fmt.Errorf("on EvDeleteURLBySessionID fail: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Service) GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error) {
@@ -178,6 +204,10 @@ func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
 	p, err := event.GetPayload[event.PayloadGetURL](res)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch data: %w", err)
+	}
+
+	if p.IsGone {
+		return p.OriginalURL, ErrGone
 	}
 
 	return p.OriginalURL, nil

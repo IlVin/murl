@@ -25,6 +25,12 @@ SELECT id, 't'::boolean AS conflict FROM murl WHERE url = $1
 LIMIT 1;
 `
 
+const sqlDelBySessionID string = `
+UPDATE murl
+SET deleted = 't'::boolean
+WHERE id = $1 AND session_id = $2
+`
+
 const sqlSetBySessionID string = `
 	INSERT INTO murl (id, url, session_id)
 	VALUES ($1, $2, $3)
@@ -131,6 +137,27 @@ func (s *PgRepoLinksBySessionID) Set(ctx context.Context, sessionID string, orig
 		return fmt.Errorf("failed to execute query (%s): %w", sqlSet, err)
 	}
 
+	return nil
+}
+
+// BatchDeleteBySessionID - Создает отложенный батч на удаление URL по SessionID
+func (s *PgRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessionID string, batch event.PayloadDeleteURLBySessionID) error {
+	shardID := s.cluster.ShardID(sessionID)
+	batcher, err := s.cluster.GetBatch(shardID)
+	if err != nil {
+		return err
+	}
+
+	for _, shortURL := range batch.ShortURLs {
+		_, idx, err := model.ParseShortPath(shortURL)
+		if err != nil {
+			return fmt.Errorf("invalid format ShortURL (%s): %w", shortURL, err)
+		}
+
+		batcher.Add(sqlDelBySessionID, []any{idx, sessionID})
+	}
+
+	batcher.Flush()
 	return nil
 }
 

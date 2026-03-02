@@ -21,6 +21,7 @@ const (
 	EvAddURLBySessionID
 	EvGetURL
 	EvGetURLBySessionID
+	EvDeleteURLBySessionID
 	EvBatch
 	EvBatchBySessionID
 	// Добавляем сюда новый тип
@@ -40,7 +41,8 @@ type Event interface {
 type Payload interface {
 	PayloadAddURL | PayloadAddURLBySessionID |
 		PayloadGetURL | PayloadGetURLBySessionID |
-		PayloadBatch | PayloadBatchBySessionID
+		PayloadBatch | PayloadBatchBySessionID |
+		PayloadDeleteURLBySessionID
 
 	EventType() EvType
 }
@@ -74,6 +76,7 @@ func (PayloadAddURLBySessionID) EventType() EvType { return EvAddURLBySessionID 
 type PayloadGetURL struct {
 	OriginalURL string `json:"original_url"`
 	ShortURL    string `json:"short_url"`
+	IsGone      bool   `json:"is_gone,omitempty"`
 }
 
 func (PayloadGetURL) EventType() EvType { return EvGetURL }
@@ -94,6 +97,16 @@ type PayloadGetURLBySessionID struct {
 func (PayloadGetURLBySessionID) EventType() EvType { return EvGetURLBySessionID }
 
 //  ------------  /EvGetURLBySessionID  ------------
+
+// ------------  EvDeleteURLBySessionID  ------------
+type PayloadDeleteURLBySessionID struct {
+	SessionID uuid.UUID `json:"session_id,omitempty"`
+	ShortURLs []string  `json:"short_urls,omitempty"`
+}
+
+func (PayloadDeleteURLBySessionID) EventType() EvType { return EvDeleteURLBySessionID }
+
+//  ------------  /EvDeleteURLBySessionID  ------------
 
 // ------------  EvBatch  ------------
 type PayloadBatchItem struct {
