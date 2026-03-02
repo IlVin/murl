@@ -107,6 +107,18 @@ func (mr *MockPgClusterMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockPgCluster)(nil).Close))
 }
 
+// Flush mocks base method.
+func (m *MockPgCluster) Flush() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Flush")
+}
+
+// Flush indicates an expected call of Flush.
+func (mr *MockPgClusterMockRecorder) Flush() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockPgCluster)(nil).Flush))
+}
+
 // GetShard mocks base method.
 func (m *MockPgCluster) GetShard(shardID byte) (pgc.PgInstance, error) {
 	m.ctrl.T.Helper()

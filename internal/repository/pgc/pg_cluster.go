@@ -30,4 +30,7 @@ type PgCluster interface {
 
 	// Size размер кластера
 	Size() byte
+
+	// Записать в БД батчи
+	Flush()
 }

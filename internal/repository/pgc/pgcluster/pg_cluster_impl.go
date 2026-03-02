@@ -9,12 +9,16 @@ import (
 	"murl/internal/repository/pgc"
 	"murl/internal/repository/pgc/instance"
 	"murl/internal/repository/pgc/metrics"
+	"sync"
 )
 
 // pgCluster
 type pgCluster struct {
-	instances []pgc.PgInstance
-	shards    []pgc.PgInstance
+	batchLimiter chan bool
+	batchWg      *sync.WaitGroup
+	instances    []pgc.PgInstance
+	batchers     []*instance.BatchExec
+	shards       []pgc.PgInstance
 }
 
 // NewPgCluster конструктор пула шардов
@@ -25,8 +29,11 @@ func NewPgCluster(ctx context.Context, cfg pgc.PgClusterConfig, metrics *metrics
 	}
 
 	c := &pgCluster{
-		instances: make([]pgc.PgInstance, 0, 1),
-		shards:    make([]pgc.PgInstance, 0, shardSize),
+		batchLimiter: make(chan bool, 3),
+		batchWg:      &sync.WaitGroup{},
+		instances:    make([]pgc.PgInstance, 0, 1),
+		batchers:     make([]*instance.BatchExec, 0, shardSize),
+		shards:       make([]pgc.PgInstance, 0, shardSize),
 	}
 
 	// В БД на текущий момент шардирования нет,
@@ -46,6 +53,15 @@ func NewPgCluster(ctx context.Context, cfg pgc.PgClusterConfig, metrics *metrics
 		c.shards = append(c.shards, pgInstance)
 	}
 
+	// Инициализация батчеров
+	for i := 0; i < shardSize; i++ {
+		c.batchers = append(c.batchers, instance.NewBatchExec(
+			c.shards[i],
+			c.batchLimiter,
+			c.batchWg,
+		))
+	}
+
 	slog.Info("PgCluster initialized",
 		slog.Int("shards_count", shardSize),
 		slog.Int("unique_instances", len(c.instances)),
@@ -59,8 +75,20 @@ func (c *pgCluster) ShardID(key any) byte {
 	return model.ShardID(key, c.Size())
 }
 
+func (c *pgCluster) Flush() {
+	if c.batchers != nil {
+		for i := range c.batchers {
+			c.batchers[i].Flush()
+		}
+		if c.batchWg != nil {
+			c.batchWg.Wait()
+		}
+	}
+}
+
 // Close последоавтельно закрывает все шарды пула
 func (c *pgCluster) Close() error {
+	c.Flush()
 	errs := make([]error, 0, len(c.instances))
 	for i := range c.instances {
 		if c.instances[i] == nil {
