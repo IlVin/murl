@@ -68,20 +68,20 @@ func TestSelect(t *testing.T) {
 	path, _, _ := repo.UpSert(ctx, url)
 
 	t.Run("Success", func(t *testing.T) {
-		res, err := repo.Select(ctx, path)
+		res, _, err := repo.Select(ctx, path)
 		assert.NoError(t, err)
 		assert.Equal(t, url, res)
 	})
 
 	t.Run("Invalid path format", func(t *testing.T) {
-		_, err := repo.Select(ctx, "invalid-marker-less-path")
+		_, _, err := repo.Select(ctx, "invalid-marker-less-path")
 		assert.Error(t, err)
 	})
 
 	t.Run("Record not found", func(t *testing.T) {
 		// Генерируем валидный путь для индекса, которого нет (999)
 		fakePath, _, _ := makeShortPath(0, 999, false)
-		_, err := repo.Select(ctx, fakePath)
+		_, _, err := repo.Select(ctx, fakePath)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 	})
@@ -103,7 +103,7 @@ func TestSet(t *testing.T) {
 		err = repo.Set(ctx, newURL, path)
 		assert.NoError(t, err)
 
-		res, _ := repo.Select(ctx, path)
+		res, _, _ := repo.Select(ctx, path)
 		assert.Equal(t, newURL, res)
 	})
 

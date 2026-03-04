@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/inmem"
@@ -198,11 +197,6 @@ func (r *repo) evDeleteURLBySessionID(ctx context.Context, e event.Event) (resEv
 	if err != nil {
 		return nil, err
 	}
-
-	slog.Info("repo.evDeleteURLBySessionID",
-		slog.Any("payload", p),
-		slog.Any("pg_cluster", r.pgCluster),
-	)
 
 	// Отложенное удаление реализовано только для Pg
 	if r.pgCluster == nil {

@@ -8,7 +8,6 @@ import (
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/pgc"
-	"sync"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -67,7 +66,7 @@ func (s *PgRepoLinksBySessionID) UpSert(ctx context.Context, sessionID string, o
 		return tx.QueryRow(ctx, sqlUpSertBySessionID, originalURL, sessionID).Scan(&idx, &cf)
 	})
 	if errTx != nil {
-		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, errTx)
+		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSertBySessionID, errTx)
 	}
 	shortPath, err := model.MakeShortPath(shardID, idx)
 	if err != nil {
@@ -86,7 +85,6 @@ func (s *PgRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID string
 	}
 
 	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
-		//		return p.QueryRow(ctx, sqlSelectAllBySessionID, sessionID).Scan(&originalURL)
 		rows, err := p.Query(ctx, sqlSelectAllBySessionID, sessionID)
 		if err != nil {
 			return err
@@ -112,7 +110,7 @@ func (s *PgRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID string
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute query (%s): %w", sqlSelect, err)
+		return nil, fmt.Errorf("failed to execute query (%s): %w", sqlSelectAllBySessionID, err)
 	}
 	slog.Info("SelectAll", slog.Any("result", result))
 	return result, nil
@@ -134,7 +132,7 @@ func (s *PgRepoLinksBySessionID) Set(ctx context.Context, sessionID string, orig
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("failed to execute query (%s): %w", sqlSet, err)
+		return fmt.Errorf("failed to execute query (%s): %w", sqlSetBySessionID, err)
 	}
 
 	return nil
@@ -157,151 +155,87 @@ func (s *PgRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessio
 		batcher.Add(sqlDelBySessionID, []any{idx, sessionID})
 	}
 
-	batcher.Flush()
 	return nil
 }
 
-// TODO PgRepoLinksBySessionID.BatchUpSert нужно упростить, так как весть батч идет в один шард. Не нужно группировать и запускать параллельно несколько горутин
-func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID string, batch event.PayloadBatch) event.PayloadBatch {
-	// Результат
-	result := event.PayloadBatch{
-		Batch: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
+func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID string, batch event.PayloadBatch) (event.PayloadBatch, error) {
+	if len(batch.Batch) == 0 {
+		return batch, nil
 	}
 
-	// Группируем элементы батча по шардам
-	byShardBatch := make(map[byte]*shardBatch)
-	for i := range batch.Batch {
-		// Ошибки сразу складываем в результат
-		if len(batch.Batch[i].Err) > 0 {
-			result.Batch = append(result.Batch, batch.Batch[i])
-			continue
+	// 1. Все записи одной сессии гарантированно попадают в один шард
+	shardID := s.cluster.ShardID(sessionID)
+	shard, err := s.cluster.GetShard(shardID)
+	if err != nil {
+		for i := range batch.Batch {
+			if batch.Batch[i].Err != "" {
+				batch.Batch[i].Err = err.Error()
+			}
 		}
-		// Распределяем по шардам
-		var sID byte
-		var idx uint64
-		var err error
-		if len(batch.Batch[i].ShortURL) > 0 {
+		return batch, fmt.Errorf("get shard fail: %w", err)
+	}
+
+	// 2. Подготавливаем нативный pgx батч
+	pgxBatch := &pgx.Batch{}
+	for i := range batch.Batch {
+		if batch.Batch[i].ShortURL != "" {
 			// Режим Set
-			sID, idx, err = model.ParseShortPath(batch.Batch[i].ShortURL)
+			_, idx, err := model.ParseShortPath(batch.Batch[i].ShortURL)
 			if err != nil {
-				slog.Error("batch in mode 'Set' ShortPath parsing fail",
-					slog.Any("err", err),
-				)
+				// Если формат плохой, помечаем ошибкой и пропускаем
+				batch.Batch[i].Err = err.Error()
 				continue
 			}
+			pgxBatch.Queue(sqlSetBySessionID, idx, batch.Batch[i].OriginalURL, sessionID)
 		} else {
 			// Режим Add
-			sID = s.cluster.ShardID(sessionID)
-		}
-
-		if byShardBatch[sID] == nil {
-			byShardBatch[sID] = &shardBatch{
-				batch: &pgx.Batch{},
-				items: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
-			}
-		}
-		byShardBatch[sID].items = append(byShardBatch[sID].items, batch.Batch[i])
-
-		if len(batch.Batch[i].ShortURL) > 0 {
-			// Режим Set
-			byShardBatch[sID].batch.Queue(sqlSetBySessionID, idx, batch.Batch[i].OriginalURL, sessionID)
-		} else {
-			// Режим Add
-			byShardBatch[sID].batch.Queue(sqlUpSertBySessionID, batch.Batch[i].OriginalURL, sessionID)
+			pgxBatch.Queue(sqlUpSertBySessionID, batch.Batch[i].OriginalURL, sessionID)
 		}
 	}
 
-	// Запускаем горутины
-	resCh := make(chan event.PayloadBatchItem, len(batch.Batch))
-	wg := sync.WaitGroup{}
-	for sID, b := range byShardBatch {
-		wg.Add(1)
-		go func(sID byte, b *shardBatch) {
-			defer wg.Done()
+	// 3. Выполняем батч в транзакции
+	errTx := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
+		br := tx.SendBatch(ctx, pgxBatch)
+		defer br.Close()
 
-			shard, err := s.cluster.GetShard(sID)
-			if err != nil {
-				// Весь батч ошибочный
-				slog.Error("shard access failed",
-					slog.Any("err", err),
-					slog.Int("sID", int(sID)),
-				)
-				for i := range b.items {
-					b.items[i].ShortURL = ""
-					b.items[i].ConflictFlag = false
-					b.items[i].Err = ErrInternalServerError.Error()
-					select {
-					case resCh <- b.items[i]:
-					case <-ctx.Done():
-						return
-					}
-				}
-				return
+		for i := range batch.Batch {
+			// Пропускаем те, что уже с ошибкой парсинга
+			if batch.Batch[i].Err != "" {
+				continue
 			}
 
-			// Выполняем batch запрос к БД
-			errPool := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
-				br := tx.SendBatch(ctx, b.batch)
-				defer br.Close()
-
-				// Вычитываем все результаты
-				for i := range b.items {
-					if err := ctx.Err(); err != nil {
-						return err
-					}
-					var idx uint64
-					var cf bool
-					if err := br.QueryRow().Scan(&idx, &cf); err != nil {
-						return err
-					}
-					shortPath, err := model.MakeShortPath(sID, idx)
-					if err != nil {
-						return err
-					}
-					b.items[i].ConflictFlag = cf
-					b.items[i].ShortURL = shortPath
+			if batch.Batch[i].ShortURL == "" {
+				// Читаем результат для sqlUpSertBySessionID (id, conflict)
+				var idx uint64
+				var cf bool
+				if err := br.QueryRow().Scan(&idx, &cf); err != nil {
+					return fmt.Errorf("scan upsert result fail (index %d): %w", i, err)
 				}
-				return nil
-			})
 
-			// Весь батч ошибочный
-			if errPool != nil {
-				slog.Error("shard batch failed",
-					slog.Any("err", errPool),
-					slog.Int("sID", int(sID)),
-					slog.Int("count", len(b.items)),
-				)
-				for i := range b.items {
-					b.items[i].ShortURL = ""
-					b.items[i].ConflictFlag = false
-					b.items[i].Err = ErrInternalServerError.Error()
+				shortPath, err := model.MakeShortPath(shardID, idx)
+				if err != nil {
+					return fmt.Errorf("make short path fail: %w", err)
+				}
+				batch.Batch[i].ShortURL = shortPath
+				batch.Batch[i].ConflictFlag = cf
+			} else {
+				// Для sqlSetBySessionID просто проверяем выполнение
+				if _, err := br.Exec(); err != nil {
+					return fmt.Errorf("exec set fail (index %d): %w", i, err)
 				}
 			}
+		}
+		return nil
+	})
 
-			// Пишем результат в канал
-			for i := range b.items {
-				if err := ctx.Err(); err != nil {
-					return
-				}
-				select {
-				case resCh <- b.items[i]:
-				case <-ctx.Done():
-					return
-				}
+	if errTx != nil {
+		for i := range batch.Batch {
+			if batch.Batch[i].Err != "" {
+				batch.Batch[i].Err = errTx.Error()
 			}
-
-		}(sID, b)
+		}
+		return batch, fmt.Errorf("batch execution failed: %w", errTx)
 	}
 
-	// Ждем джобы и закрываем результирующий канал
-	go func() {
-		wg.Wait()
-		close(resCh)
-	}()
-
-	for res := range resCh {
-		result.Batch = append(result.Batch, res)
-	}
-
-	return result
+	return batch, nil
 }

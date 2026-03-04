@@ -99,7 +99,7 @@ func TestRepo_On_EvGetURL_Success(t *testing.T) {
 
 	mockLinks.EXPECT().
 		Select(ctx, short).
-		Return(original, nil)
+		Return(original, false, nil)
 
 	resEvent, err := r.On(ctx, inputEvent)
 	require.NoError(t, err)

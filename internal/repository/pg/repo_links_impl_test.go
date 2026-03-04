@@ -78,7 +78,7 @@ func TestPgRepoLinks_Select_Success(t *testing.T) {
 			return cb(ctx, mockPool)
 		})
 
-	res, err := repo.Select(ctx, shortPath)
+	res, _, err := repo.Select(ctx, shortPath)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "https://original.url", res)

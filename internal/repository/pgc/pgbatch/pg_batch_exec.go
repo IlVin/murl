@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"murl/internal/repository/pgc"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -13,6 +15,7 @@ import (
 // Константы для подсистемы батчинга
 const BatchBufSize int = 100
 const BatchLimit int = 3
+const BatchTimeout time.Duration = 500 * time.Millisecond
 
 type BatchQuery struct {
 	SQL    string
@@ -25,6 +28,10 @@ type BatchExec struct {
 	batchWg      *sync.WaitGroup
 	mu           sync.Mutex
 	buf          []*BatchQuery
+
+	ctx       context.Context
+	cancel    func()
+	lastFlush atomic.Int64 // Храним UnixNano последнего сброса
 }
 
 func NewBatchExec(pg pgc.PgInstance, batchLimiter chan bool, batchWg *sync.WaitGroup) *BatchExec {
@@ -34,12 +41,47 @@ func NewBatchExec(pg pgc.PgInstance, batchLimiter chan bool, batchWg *sync.WaitG
 	if batchWg == nil {
 		batchWg = new(sync.WaitGroup)
 	}
-	return &BatchExec{
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	b := &BatchExec{
 		pg:           pg,
 		batchLimiter: batchLimiter,
 		batchWg:      batchWg,
 		buf:          make([]*BatchQuery, 0, BatchBufSize),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
+
+	b.lastFlush.Store(time.Now().UnixNano())
+
+	// Запуск фонового сброса по тикеру
+	go b.tickerLoop()
+
+	return b
+}
+
+func (b *BatchExec) tickerLoop() {
+	ticker := time.NewTicker(BatchTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Если с момента последнего Flush прошло больше времени, чем BatchTimeout
+			if time.Since(time.Unix(0, b.lastFlush.Load())) >= BatchTimeout {
+				b.Flush()
+			}
+		case <-b.ctx.Done():
+			return
+		}
+	}
+}
+
+// Close останавливает тикер и сбрасывает остатки (Graceful shutdown)
+func (b *BatchExec) Close() {
+	b.cancel()
+	b.Flush()
 }
 
 // Add добавляет SQL запрос в буфер и, по заполненности буфера, запускает batchExecutor
@@ -72,6 +114,9 @@ func (b *BatchExec) flush(maxBufLen int) {
 	execBuf := b.buf
 	b.buf = make([]*BatchQuery, 0, BatchBufSize)
 
+	// Обновляем метку времени последнего сброса
+	b.lastFlush.Store(time.Now().UnixNano())
+
 	// Запускаем горутину
 	b.batchWg.Add(1)
 	go b.execQuery(execBuf)
@@ -101,7 +146,8 @@ func (b *BatchExec) execQuery(buf []*BatchQuery) {
 	defer func() { <-b.batchLimiter }()
 
 	// Вызываем исполнятор батча
-	err := b.pg.Tx(context.Background(), func(ctx context.Context, tx pgc.PgxTxIface) error {
+	execCtx := context.WithoutCancel(b.ctx)
+	err := b.pg.Tx(execCtx, func(ctx context.Context, tx pgc.PgxTxIface) error {
 		br := tx.SendBatch(ctx, batch)
 		defer br.Close()
 		for range batch.Len() {

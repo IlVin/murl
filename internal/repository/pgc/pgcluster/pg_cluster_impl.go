@@ -90,6 +90,11 @@ func (c *pgCluster) Flush() {
 // Close последоавтельно закрывает все шарды пула
 func (c *pgCluster) Close() error {
 	c.Flush()
+	if c.batchers != nil {
+		for i := range c.batchers {
+			c.batchers[i].Close()
+		}
+	}
 	errs := make([]error, 0, len(c.instances))
 	for i := range c.instances {
 		if c.instances[i] == nil {
