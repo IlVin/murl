@@ -197,7 +197,7 @@ func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 			return
 		}
 
-		var data []string = make([]string, 0, 100)
+		data := make([]string, 0, 100)
 		err = json.Unmarshal(buf, &data)
 		if err != nil {
 			slog.Error("request body validation failed",
