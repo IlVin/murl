@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"murl/internal/model"
@@ -169,6 +170,8 @@ func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID stri
 	if err != nil {
 		for i := range batch.Batch {
 			if batch.Batch[i].Err != "" {
+				batch.Batch[i].Err = errors.Join(errors.New(batch.Batch[i].Err), err).Error()
+			} else {
 				batch.Batch[i].Err = err.Error()
 			}
 		}
