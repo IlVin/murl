@@ -10,6 +10,7 @@
 package mocks
 
 import (
+	config "murl/internal/config"
 	model "murl/internal/model"
 	reflect "reflect"
 	time "time"
@@ -138,10 +139,10 @@ func (mr *MockSessionConfigMockRecorder) JWTTTL() *gomock.Call {
 }
 
 // KeySession mocks base method.
-func (m *MockSessionConfig) KeySession() string {
+func (m *MockSessionConfig) KeySession() config.KeySession {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "KeySession")
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(config.KeySession)
 	return ret0
 }
 

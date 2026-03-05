@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"murl/internal/config"
 	"strings"
 	"time"
 
@@ -173,7 +174,7 @@ func castToUint64(v any) uint64 {
 	}
 }
 
-func GetSession(ctx context.Context, keySession string) (Session, bool) {
+func GetSession(ctx context.Context, keySession config.KeySession) (Session, bool) {
 	s, ok := ctx.Value(keySession).(Session)
 	return s, ok
 }

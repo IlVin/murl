@@ -41,10 +41,10 @@ func (m *MockServiceConfig) EXPECT() *MockServiceConfigMockRecorder {
 }
 
 // KeySession mocks base method.
-func (m *MockServiceConfig) KeySession() string {
+func (m *MockServiceConfig) KeySession() config.KeySession {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "KeySession")
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(config.KeySession)
 	return ret0
 }
 

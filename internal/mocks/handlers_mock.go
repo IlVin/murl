@@ -11,6 +11,7 @@ package mocks
 
 import (
 	context "context"
+	config "murl/internal/config"
 	model "murl/internal/model"
 	event "murl/internal/model/event"
 	reflect "reflect"
@@ -43,10 +44,10 @@ func (m *MockHandlersConfig) EXPECT() *MockHandlersConfigMockRecorder {
 }
 
 // KeySession mocks base method.
-func (m *MockHandlersConfig) KeySession() string {
+func (m *MockHandlersConfig) KeySession() config.KeySession {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "KeySession")
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(config.KeySession)
 	return ret0
 }
 

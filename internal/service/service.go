@@ -22,13 +22,13 @@ var ErrGone = errors.New("gone")
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
 	ShortBaseURL() config.ShortBaseURL
-	KeySession() string
+	KeySession() config.KeySession
 }
 
 type Service struct {
 	shortBaseURL config.ShortBaseURL
 	repo         repository.Repo
-	keySession   string
+	keySession   config.KeySession
 }
 
 func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo) *Service {

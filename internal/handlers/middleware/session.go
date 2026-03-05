@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"murl/internal/config"
 	"murl/internal/model"
 	"murl/internal/model/jwtmanager"
 	"net/http"
@@ -24,7 +25,7 @@ type TokenManager interface {
 }
 
 type SessionConfig interface {
-	KeySession() string
+	KeySession() config.KeySession
 	jwtmanager.JWTManagerConfig
 }
 

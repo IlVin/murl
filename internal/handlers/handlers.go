@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"murl/internal/config"
 	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/service"
@@ -18,7 +19,7 @@ import (
 
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
-	KeySession() string
+	KeySession() config.KeySession
 }
 
 // Эти методы сервиса используются хэндлерами
@@ -33,7 +34,7 @@ type MicroURLService interface {
 
 type Handlers struct {
 	service    MicroURLService
-	keySession string
+	keySession config.KeySession
 }
 
 func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"murl/internal/config"
 	"murl/internal/mocks"
 	"murl/internal/model"
 	"net/http"
@@ -20,7 +21,7 @@ func TestWithSession_Integration(t *testing.T) {
 	// Настраиваем обязательные параметры для инициализации jwtmanager
 	secret := "secret-key-32-chars-length-needed"
 	ttl := time.Hour
-	keySession := "keySession"
+	keySession := config.KeySession("keySession")
 	mockCfg.EXPECT().JWTSecretKey().Return(secret).AnyTimes()
 	mockCfg.EXPECT().JWTTTL().Return(ttl).AnyTimes()
 	mockCfg.EXPECT().KeySession().Return(keySession).AnyTimes()

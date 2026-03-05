@@ -16,7 +16,7 @@ import (
 
 // Вспомогательный мок конфига
 type mockSvcConfig struct {
-	keySession string
+	keySession config.KeySession
 	baseURL    string
 }
 
@@ -25,7 +25,7 @@ func (m *mockSvcConfig) ShortBaseURL() config.ShortBaseURL {
 	return config.ShortBaseURL{URL: *u}
 }
 
-func (m *mockSvcConfig) KeySession() string {
+func (m *mockSvcConfig) KeySession() config.KeySession {
 	return m.keySession
 }
 

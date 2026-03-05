@@ -26,8 +26,10 @@ type Config struct {
 	maxBodySize              int64
 	jwtSecretKey             string
 	jwtTTL                   time.Duration
-	keySession               string
+	keySession               KeySession
 }
+
+type KeySession string
 
 type LookupEnvFunc func(key string) (string, bool)
 
@@ -144,10 +146,10 @@ func (c Config) SetJWTTTL(jwtTTL time.Duration) Config {
 	return c
 }
 
-func (c Config) KeySession() string {
+func (c Config) KeySession() KeySession {
 	return c.keySession
 }
-func (c Config) SetKeySession(keySession string) Config {
+func (c Config) SetKeySession(keySession KeySession) Config {
 	c.keySession = keySession
 	return c
 }

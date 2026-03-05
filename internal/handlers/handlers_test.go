@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 
+	"murl/internal/config"
 	"murl/internal/mocks"
 	"murl/internal/model/event"
 	"murl/internal/service"
@@ -19,10 +20,10 @@ import (
 
 // Вспомогательный мок конфига
 type mockSvcConfig struct {
-	keySession string
+	keySession config.KeySession
 }
 
-func (m *mockSvcConfig) KeySession() string {
+func (m *mockSvcConfig) KeySession() config.KeySession {
 	return m.keySession
 }
 
