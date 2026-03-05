@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"murl/internal/handlers/middleware"
 	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/service"
@@ -19,6 +18,7 @@ import (
 
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
+	KeySession() string
 }
 
 // Эти методы сервиса используются хэндлерами
@@ -32,12 +32,14 @@ type MicroURLService interface {
 }
 
 type Handlers struct {
-	service MicroURLService
+	service    MicroURLService
+	keySession string
 }
 
 func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	return &Handlers{
-		service: service,
+		service:    service,
+		keySession: cfg.KeySession(),
 	}
 }
 
@@ -127,7 +129,7 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 // =========== GET /api/user/urls ==================
 func (h *Handlers) APIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		session, ok := middleware.GetSession(r.Context())
+		session, ok := model.GetSession(r.Context(), h.keySession)
 		if !ok {
 			slog.Warn("APIUserURLs unauthorized request")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -175,7 +177,7 @@ func (h *Handlers) APIUserURLs() http.HandlerFunc {
 // =========== DELETE /api/user/urls ==================
 func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		session, ok := middleware.GetSession(r.Context())
+		session, ok := model.GetSession(r.Context(), h.keySession)
 		if !ok {
 			slog.Warn("APIUserURLs unauthorized request")
 			w.WriteHeader(http.StatusUnauthorized)

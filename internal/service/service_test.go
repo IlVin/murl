@@ -16,12 +16,17 @@ import (
 
 // Вспомогательный мок конфига
 type mockSvcConfig struct {
-	baseURL string
+	keySession string
+	baseURL    string
 }
 
 func (m *mockSvcConfig) ShortBaseURL() config.ShortBaseURL {
 	u, _ := url.Parse(m.baseURL)
 	return config.ShortBaseURL{URL: *u}
+}
+
+func (m *mockSvcConfig) KeySession() string {
+	return m.keySession
 }
 
 func TestService_AddURL_Success(t *testing.T) {

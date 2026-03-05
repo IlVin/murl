@@ -136,3 +136,17 @@ func (mr *MockSessionConfigMockRecorder) JWTTTL() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "JWTTTL", reflect.TypeOf((*MockSessionConfig)(nil).JWTTTL))
 }
+
+// KeySession mocks base method.
+func (m *MockSessionConfig) KeySession() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "KeySession")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// KeySession indicates an expected call of KeySession.
+func (mr *MockSessionConfigMockRecorder) KeySession() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "KeySession", reflect.TypeOf((*MockSessionConfig)(nil).KeySession))
+}

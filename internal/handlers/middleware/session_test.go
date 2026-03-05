@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"murl/internal/mocks"
+	"murl/internal/model"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,11 +20,13 @@ func TestWithSession_Integration(t *testing.T) {
 	// Настраиваем обязательные параметры для инициализации jwtmanager
 	secret := "secret-key-32-chars-length-needed"
 	ttl := time.Hour
+	keySession := "keySession"
 	mockCfg.EXPECT().JWTSecretKey().Return(secret).AnyTimes()
 	mockCfg.EXPECT().JWTTTL().Return(ttl).AnyTimes()
+	mockCfg.EXPECT().KeySession().Return(keySession).AnyTimes()
 	// 2. Хендлер-заглушка для проверки контекста
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s, ok := GetSession(r.Context())
+		s, ok := model.GetSession(r.Context(), keySession)
 		if ok && !(s.ID.String() == "") {
 			w.WriteHeader(http.StatusOK)
 			return

@@ -42,6 +42,20 @@ func (m *MockHandlersConfig) EXPECT() *MockHandlersConfigMockRecorder {
 	return m.recorder
 }
 
+// KeySession mocks base method.
+func (m *MockHandlersConfig) KeySession() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "KeySession")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// KeySession indicates an expected call of KeySession.
+func (mr *MockHandlersConfigMockRecorder) KeySession() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "KeySession", reflect.TypeOf((*MockHandlersConfig)(nil).KeySession))
+}
+
 // MockMicroURLService is a mock of MicroURLService interface.
 type MockMicroURLService struct {
 	ctrl     *gomock.Controller

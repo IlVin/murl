@@ -13,11 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-type ctxSessionKey int
-
 const (
-	KeySession ctxSessionKey = iota
-	cookieName string        = "murl_session"
+	cookieName string = "murl_session"
 )
 
 type TokenManager interface {
@@ -27,6 +24,7 @@ type TokenManager interface {
 }
 
 type SessionConfig interface {
+	KeySession() string
 	jwtmanager.JWTManagerConfig
 }
 
@@ -46,6 +44,8 @@ func setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
 
 // WithSession проверяет JWT, продлевает его при необходимости и сохраняет сессию в контекст
 func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
+	keySession := cfg.KeySession()
+
 	manager, err := jwtmanager.NewJWT(cfg)
 	if err != nil {
 		// Критическая ошибка конфигурации — не даем запустить сервер
@@ -100,15 +100,10 @@ func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 			}
 
 			// 3. Передача в контекст
-			ctx := context.WithValue(r.Context(), KeySession, session)
+			ctx := context.WithValue(r.Context(), keySession, session)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-func GetSession(ctx context.Context) (model.Session, bool) {
-	s, ok := ctx.Value(KeySession).(model.Session)
-	return s, ok
 }
 
 func extractToken(r *http.Request) string {

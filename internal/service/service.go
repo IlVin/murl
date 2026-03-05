@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"murl/internal/config"
-	"murl/internal/handlers/middleware"
 	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/repository"
@@ -23,17 +22,20 @@ var ErrGone = errors.New("gone")
 // Объявляем список используемых параметров конфига
 type ServiceConfig interface {
 	ShortBaseURL() config.ShortBaseURL
+	KeySession() string
 }
 
 type Service struct {
 	shortBaseURL config.ShortBaseURL
 	repo         repository.Repo
+	keySession   string
 }
 
 func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo) *Service {
 	return &Service{
 		shortBaseURL: cfg.ShortBaseURL(),
 		repo:         repo,
+		keySession:   cfg.KeySession(),
 	}
 }
 
@@ -134,7 +136,7 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 	var e event.Event
 	var session model.Session
 	var sessionMode bool
-	if session, sessionMode = middleware.GetSession(ctx); sessionMode {
+	if session, sessionMode = model.GetSession(ctx, s.keySession); sessionMode {
 		e, err = event.MakeEvent(
 			event.PayloadAddURLBySessionID{
 				OriginalURL: normalizedURL.String(),

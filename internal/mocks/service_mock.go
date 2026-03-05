@@ -40,6 +40,20 @@ func (m *MockServiceConfig) EXPECT() *MockServiceConfigMockRecorder {
 	return m.recorder
 }
 
+// KeySession mocks base method.
+func (m *MockServiceConfig) KeySession() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "KeySession")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// KeySession indicates an expected call of KeySession.
+func (mr *MockServiceConfigMockRecorder) KeySession() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "KeySession", reflect.TypeOf((*MockServiceConfig)(nil).KeySession))
+}
+
 // ShortBaseURL mocks base method.
 func (m *MockServiceConfig) ShortBaseURL() config.ShortBaseURL {
 	m.ctrl.T.Helper()

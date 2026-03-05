@@ -17,12 +17,22 @@ import (
 	"murl/internal/service"
 )
 
+// Вспомогательный мок конфига
+type mockSvcConfig struct {
+	keySession string
+}
+
+func (m *mockSvcConfig) KeySession() string {
+	return m.keySession
+}
+
 func TestHandlers_AddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockMicroURLService(ctrl)
-	h := NewHandlers(nil, mockSvc)
+	cfg := &mockSvcConfig{keySession: "keySession"}
+	h := NewHandlers(cfg, mockSvc)
 
 	originalURL := "https://google.com"
 	shortURL := "http://short.io"
@@ -49,7 +59,8 @@ func TestHandlers_AddURL_Conflict(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockMicroURLService(ctrl)
-	h := NewHandlers(nil, mockSvc)
+	cfg := &mockSvcConfig{keySession: "keySession"}
+	h := NewHandlers(cfg, mockSvc)
 
 	// Имитируем ошибку конфликта из сервиса
 	mockSvc.EXPECT().
@@ -69,7 +80,8 @@ func TestHandlers_APIShortenBatch_Streaming(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockMicroURLService(ctrl)
-	h := NewHandlers(nil, mockSvc)
+	cfg := &mockSvcConfig{keySession: "keySession"}
+	h := NewHandlers(cfg, mockSvc)
 
 	// Входной JSON массив
 	inputJSON := `[
@@ -109,7 +121,8 @@ func TestHandlers_GetURL_Redirect(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockMicroURLService(ctrl)
-	h := NewHandlers(nil, mockSvc)
+	cfg := &mockSvcConfig{keySession: "keySession"}
+	h := NewHandlers(cfg, mockSvc)
 
 	originalURL := "https://murl.io"
 	mockSvc.EXPECT().
@@ -130,7 +143,8 @@ func TestHandlers_Ping_Error(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockMicroURLService(ctrl)
-	h := NewHandlers(nil, mockSvc)
+	cfg := &mockSvcConfig{keySession: "keySession"}
+	h := NewHandlers(cfg, mockSvc)
 
 	mockSvc.EXPECT().Ping(gomock.Any()).Return(errors.New("db connection lost"))
 

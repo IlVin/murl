@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -170,4 +171,9 @@ func castToUint64(v any) uint64 {
 	default:
 		return 0
 	}
+}
+
+func GetSession(ctx context.Context, keySession string) (Session, bool) {
+	s, ok := ctx.Value(keySession).(Session)
+	return s, ok
 }
