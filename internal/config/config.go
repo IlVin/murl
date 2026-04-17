@@ -27,6 +27,8 @@ type Config struct {
 	jwtSecretKey             string
 	jwtTTL                   time.Duration
 	keySession               KeySession
+	auditFile                string
+	auditURL                 *url.URL
 }
 
 type KeySession string
@@ -61,6 +63,8 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		jwtSecretKey:     "jwtSecretKey+jwtSecretKey-jwtSecretKey+jwtSecretKey-jwtSecretKey",
 		jwtTTL:           30 * 24 * time.Hour,
 		keySession:       "session",
+		auditFile:        "",
+		auditURL:         nil,
 	}
 
 	// Command line arguments
@@ -97,6 +101,29 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		cfg = cfg.SetEventStoragePath(s)
 		return nil
 	})
+	fs.Func("audit-file", fmt.Sprintf("Path to audit file (%s)", cfg.AuditFile()), func(s string) error {
+		if s == "" {
+			return nil
+		}
+		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			return fmt.Errorf("invalid path to audit file: %w", err)
+		}
+		defer fh.Close()
+		cfg = cfg.SetAuditFile(s)
+		return nil
+	})
+	fs.Func("audit-url", fmt.Sprintf("Audit URL (%s)", cfg.AuditURL()), func(s string) error {
+		if s == "" {
+			return nil
+		}
+		u, err := url.Parse(s)
+		if err != nil {
+			return fmt.Errorf("invalid --audit-url: %w", err)
+		}
+		cfg = cfg.SetAuditURL(u)
+		return nil
+	})
 	if cmdArgs != nil {
 		if err := fs.Parse(*cmdArgs); err != nil {
 			return cfg, fmt.Errorf("failed to parse flags: %w", err)
@@ -129,6 +156,25 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			}
 			defer fh.Close()
 			cfg = cfg.SetEventStoragePath(s)
+		}
+	}
+	if s, ok := lookupEnv("AUDIT_FILE"); ok {
+		if s != "" {
+			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
+			}
+			defer fh.Close()
+			cfg = cfg.SetAuditFile(s)
+		}
+	}
+	if s, ok := lookupEnv("AUDIT_URL"); ok {
+		if s != "" {
+			u, err := url.Parse(s)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
+			}
+			cfg = cfg.SetAuditURL(u)
 		}
 	}
 
@@ -191,6 +237,22 @@ func (c Config) EventStoragePath() string {
 }
 func (c Config) SetEventStoragePath(eventStoragePath string) Config {
 	c.eventStoragePath = eventStoragePath
+	return c
+}
+
+func (c Config) AuditFile() string {
+	return c.auditFile
+}
+func (c Config) SetAuditFile(auditFile string) Config {
+	c.auditFile = auditFile
+	return c
+}
+
+func (c Config) AuditURL() *url.URL {
+	return c.auditURL
+}
+func (c Config) SetAuditURL(auditURL *url.URL) Config {
+	c.auditURL = auditURL
 	return c
 }
 

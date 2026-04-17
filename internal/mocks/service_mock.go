@@ -10,7 +10,9 @@
 package mocks
 
 import (
+	context "context"
 	config "murl/internal/config"
+	domain "murl/internal/domain"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -66,4 +68,42 @@ func (m *MockServiceConfig) ShortBaseURL() config.ShortBaseURL {
 func (mr *MockServiceConfigMockRecorder) ShortBaseURL() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ShortBaseURL", reflect.TypeOf((*MockServiceConfig)(nil).ShortBaseURL))
+}
+
+// MockAuditlogNotifier is a mock of AuditlogNotifier interface.
+type MockAuditlogNotifier struct {
+	ctrl     *gomock.Controller
+	recorder *MockAuditlogNotifierMockRecorder
+	isgomock struct{}
+}
+
+// MockAuditlogNotifierMockRecorder is the mock recorder for MockAuditlogNotifier.
+type MockAuditlogNotifierMockRecorder struct {
+	mock *MockAuditlogNotifier
+}
+
+// NewMockAuditlogNotifier creates a new mock instance.
+func NewMockAuditlogNotifier(ctrl *gomock.Controller) *MockAuditlogNotifier {
+	mock := &MockAuditlogNotifier{ctrl: ctrl}
+	mock.recorder = &MockAuditlogNotifierMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAuditlogNotifier) EXPECT() *MockAuditlogNotifierMockRecorder {
+	return m.recorder
+}
+
+// Notify mocks base method.
+func (m *MockAuditlogNotifier) Notify(ctx context.Context, n domain.Notification) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Notify", ctx, n)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Notify indicates an expected call of Notify.
+func (mr *MockAuditlogNotifierMockRecorder) Notify(ctx, n any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Notify", reflect.TypeOf((*MockAuditlogNotifier)(nil).Notify), ctx, n)
 }

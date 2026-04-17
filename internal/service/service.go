@@ -2,14 +2,20 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"murl/internal/config"
+	"murl/internal/domain"
+	"murl/internal/dto"
 	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"net/url"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrInvalidURLFormat = errors.New("invalid URL format")
@@ -25,16 +31,23 @@ type ServiceConfig interface {
 	KeySession() config.KeySession
 }
 
+// Тип, поддерживающий прием нотификаций
+type AuditlogNotifier interface {
+	Notify(ctx context.Context, n domain.Notification) error
+}
+
 type Service struct {
 	shortBaseURL config.ShortBaseURL
 	repo         repository.Repo
+	aNotifier    AuditlogNotifier
 	keySession   config.KeySession
 }
 
-func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo) *Service {
+func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo, an AuditlogNotifier) *Service {
 	return &Service{
 		shortBaseURL: cfg.ShortBaseURL(),
 		repo:         repo,
+		aNotifier:    an,
 		keySession:   cfg.KeySession(),
 	}
 }
@@ -185,11 +198,39 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 		slog.Bool("conflict_flag", conflictFlag),
 	)
 
+	// Отправляем нотификацию
+	notifCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	errNotif := s.sendNotification(notifCtx, "shorten", &session.ID, originalURL)
+	if errNotif != nil {
+		slog.Error("audit log notification failure",
+			slog.Any("err", err),
+		)
+	}
+
 	if conflictFlag {
 		return u.String(), fmt.Errorf("original URL %s already shortened to short URL %s: %w", normalizedURL, u.String(), ErrConflict)
 	}
 
 	return u.String(), nil
+}
+
+func (s *Service) sendNotification(ctx context.Context, action string, userID *uuid.UUID, originalURL string) error {
+	notif := dto.AuditlogNotification{
+		UnixTimestamp: time.Now().Unix(), // unix timestamp события
+		Action:        "shorten",         // действие: shorten (создание) или follow (прохождение по ссылке)
+		OrigURL:       originalURL,
+		UserID:        userID,
+	}
+
+	n, err := json.Marshal(notif)
+	if err != nil {
+		return fmt.Errorf("audit notification marshalling failure: %w", err)
+	}
+	if err := s.aNotifier.Notify(ctx, domain.Notification{Message: n}); err != nil {
+		return fmt.Errorf("audit log notification send failure: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
@@ -210,6 +251,16 @@ func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
 
 	if p.IsGone {
 		return p.OriginalURL, ErrGone
+	}
+
+	// Отправляем нотификацию
+	notifCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	errNotif := s.sendNotification(notifCtx, "follow", nil, p.OriginalURL)
+	if errNotif != nil {
+		slog.Error("audit log notification failure",
+			slog.Any("err", err),
+		)
 	}
 
 	return p.OriginalURL, nil

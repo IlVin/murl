@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"os"
 
+	"murl/internal/adapters"
 	"murl/internal/config"
 	"murl/internal/handlers"
+	"murl/internal/model/auditlog"
 	"murl/internal/repository/repo"
 	"murl/internal/service"
 
@@ -28,7 +30,6 @@ func main() {
 
 func run() error {
 
-	// Global Context
 	ctx := context.Background()
 
 	// Загрузка .env
@@ -45,6 +46,16 @@ func run() error {
 		slog.String("router", cfg.RouterType()),
 	)
 
+	// Auditlog Observer
+	auditlog := auditlog.NewAuditlog()
+	auditlog.Start(3)     // Стартуем 3х воркеров для рассылки нотификаций
+	defer auditlog.Stop() // Не забываем остановить воркеров
+
+	slog.Info("created auditlog observer")
+
+	// Добавляем потребителей, которые запишут нотификацию во всякие разные внешние места
+	adapters.AddAuditConsumers(cfg, auditlog)
+
 	// Репозиторий
 	repo, err := repo.NewRepo(ctx, cfg)
 	if err != nil {
@@ -53,7 +64,7 @@ func run() error {
 	defer repo.Close()
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
-	srv := service.NewService(ctx, cfg, repo)
+	srv := service.NewService(ctx, cfg, repo, auditlog)
 
 	// HTTP хэндлеры, связанные вызовами с service
 	h := handlers.NewHandlers(cfg, srv)
