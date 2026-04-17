@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewUrlAuditlog(t *testing.T) {
+func TestNewURLAuditlog(t *testing.T) {
 	id := "test-url-id"
 	url := "http://localhost:8080"
-	adapter := NewUrlAuditlog(id, url)
+	adapter := NewURLAuditlog(id, url)
 
 	assert.Equal(t, id, adapter.id)
 	assert.Equal(t, url, adapter.baseURL)
@@ -21,12 +21,12 @@ func TestNewUrlAuditlog(t *testing.T) {
 	assert.Equal(t, 10*time.Second, adapter.httpClient.Timeout)
 }
 
-func TestUrlAuditlog_GetID(t *testing.T) {
-	adapter := NewUrlAuditlog("worker-1", "")
+func TestURLAuditlog_GetID(t *testing.T) {
+	adapter := NewURLAuditlog("worker-1", "")
 	assert.Equal(t, "worker-1", adapter.GetID())
 }
 
-func TestUrlAuditlog_Update(t *testing.T) {
+func TestURLAuditlog_Update(t *testing.T) {
 	tests := []struct {
 		name           string
 		serverResponse func(w http.ResponseWriter, r *http.Request)
@@ -84,7 +84,7 @@ func TestUrlAuditlog_Update(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(tt.serverResponse))
 			defer server.Close()
 
-			adapter := NewUrlAuditlog("test", server.URL)
+			adapter := NewURLAuditlog("test", server.URL)
 			err := adapter.Update(tt.notif)
 
 			if tt.expectedError != nil {
@@ -98,14 +98,14 @@ func TestUrlAuditlog_Update(t *testing.T) {
 	}
 }
 
-func TestUrlAuditlog_Update_NetworkError(t *testing.T) {
+func TestURLAuditlog_Update_NetworkError(t *testing.T) {
 	// Сценарий: некорректный URL (ошибка NewRequest или Do)
-	adapter := NewUrlAuditlog("test", "cache_object://invalid-url")
+	adapter := NewURLAuditlog("test", "cache_object://invalid-url")
 	err := adapter.Update(domain.Notification{Message: []byte("data")})
 	assert.Error(t, err)
 }
 
-func TestUrlAuditlog_Update_Timeout(t *testing.T) {
+func TestURLAuditlog_Update_Timeout(t *testing.T) {
 	// Сценарий: сервер отвечает слишком долго
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(20 * time.Millisecond) // Имитируем задержку
@@ -113,7 +113,7 @@ func TestUrlAuditlog_Update_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := NewUrlAuditlog("test", server.URL)
+	adapter := NewURLAuditlog("test", server.URL)
 	// Искусственно занижаем таймаут для теста
 	adapter.httpClient.Timeout = 5 * time.Millisecond
 

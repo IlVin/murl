@@ -24,15 +24,15 @@ var (
 ждет завершения работы всех своих воркеров, т.е. принцип Gracefull shutdown будет соблюден
 */
 
-type UrlAuditlog struct {
+type URLAuditlog struct {
 	id         string
 	httpClient *http.Client
 	baseURL    string
 }
 
-// NewUrlAuditlog конструктор
-func NewUrlAuditlog(id string, u string) *UrlAuditlog {
-	return &UrlAuditlog{
+// NewURLAuditlog конструктор
+func NewURLAuditlog(id string, u string) *URLAuditlog {
+	return &URLAuditlog{
 		id:      id,
 		baseURL: u,
 		httpClient: &http.Client{
@@ -43,12 +43,12 @@ func NewUrlAuditlog(id string, u string) *UrlAuditlog {
 }
 
 // GetID возвращает ID потребителя нотификаций
-func (u *UrlAuditlog) GetID() string {
+func (u *URLAuditlog) GetID() string {
 	return u.id
 }
 
 // Update отправляет нотификацию в Audit URL
-func (u *UrlAuditlog) Update(notif domain.Notification) error {
+func (u *URLAuditlog) Update(notif domain.Notification) error {
 	req, err := http.NewRequest(http.MethodPost, u.baseURL, bytes.NewReader(notif.Message))
 	if err != nil {
 		return err

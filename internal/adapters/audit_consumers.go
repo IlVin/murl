@@ -8,7 +8,7 @@ import (
 
 const (
 	AuditFileID = "AuditFile"
-	AuditUrlID  = "AuditURL"
+	AuditURLID  = "AuditURL"
 )
 
 type AuditlogConfig interface {
@@ -29,7 +29,7 @@ func AddAuditConsumers(cfg AuditlogConfig, a AuditlogSubscriber) {
 		)
 	}
 	if au := cfg.AuditURL(); au != nil {
-		a.Register(NewUrlAuditlog(AuditUrlID, au.String()))
+		a.Register(NewURLAuditlog(AuditURLID, au.String()))
 		slog.Info("register URL audit consumer",
 			slog.String("audit_url", au.String()),
 		)
