@@ -41,7 +41,7 @@ func (cw *CompressResponseWriter) getCodec() Codec {
 
 	// Собираем кодеки из Accept-Encoding запроса
 	for _, headerValue := range cw.r.Header.Values("Accept-Encoding") {
-		for _, rawPart := range strings.Split(headerValue, ",") {
+		for rawPart := range strings.SplitSeq(headerValue, ",") {
 			parts := strings.SplitN(strings.TrimSpace(rawPart), ";q=", 2)
 			name := strings.ToLower(strings.TrimSpace(parts[0]))
 			if name == "" {

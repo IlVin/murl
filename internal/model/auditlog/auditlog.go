@@ -63,13 +63,11 @@ func (o *Auditlog) UnRegister(s Subscriber) {
 func (o *Auditlog) Start(wrkCount int) {
 	// Запускаем воркеров
 	for range wrkCount {
-		o.wg.Add(1)
-		go func() {
-			defer o.wg.Done()
+		o.wg.Go(func() {
 			for n := range o.notifications {
 				o.send(n)
 			}
-		}()
+		})
 	}
 	slog.Info("audit observer workers started")
 }

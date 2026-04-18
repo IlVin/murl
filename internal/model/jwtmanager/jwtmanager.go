@@ -83,7 +83,7 @@ func (m *jwtManager) GenerateJWT(session model.Session) (string, error) {
 func (m *jwtManager) VerifyJWT(tokenString string) (model.Session, error) {
 	claims := &Claims{}
 
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}

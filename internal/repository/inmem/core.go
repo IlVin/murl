@@ -60,7 +60,7 @@ func NewInMemCore(cfg InMemConfig) (*InMemCore, error) {
 		shards: make([]InMemShard, shardSize),
 	}
 
-	for i := 0; i < shardSize; i++ {
+	for i := range shardSize {
 		s.shards[i].Data = make(map[uint64]string, defaultCap)
 		s.shards[i].Index = make(map[string]uint64, defaultCap)
 		s.shards[i].Sessions = make(map[string][]uint64, defaultCap)

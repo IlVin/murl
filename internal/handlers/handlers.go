@@ -397,7 +397,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 		part := make([]dto.BatchItem, 0, 1000)
 		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
 		for mv := range decoder.Stream() {
-			v, ok := mv.Value.(map[string]interface{})
+			v, ok := mv.Value.(map[string]any)
 			if !ok {
 				slog.Error("Bad format of batch item",
 					slog.Any("batch_item", mv),

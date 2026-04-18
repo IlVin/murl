@@ -112,12 +112,10 @@ func TestAuditlog_Concurrency(t *testing.T) {
 	o.Start(10) // 10 воркеров
 
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range count {
+		wg.Go(func() {
 			_ = o.Notify(context.Background(), domain.Notification{Message: []byte("msg")})
-		}()
+		})
 	}
 
 	wg.Wait()

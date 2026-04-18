@@ -91,7 +91,7 @@ func TestLoadWAL_ContextCancel(t *testing.T) {
 	p := dto.AddURL{OriginalURL: "limit"}
 	ev, _ := event.MakeEvent(p, nil)
 	data, _ := ev.Serialize()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		fh.Write(append(data, '\n'))
 	}
 	fh.Close()

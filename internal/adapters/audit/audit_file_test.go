@@ -97,7 +97,7 @@ func TestFileAuditlog_FlockIntegrity(t *testing.T) {
 	adapter := NewFileAuditlog("worker", logPath)
 
 	// Пишем 10 сообщений подряд
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		msg := fmt.Sprintf("line %d", i)
 		err := adapter.Update(domain.Notification{Message: []byte(msg)})
 		assert.NoError(t, err)
