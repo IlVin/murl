@@ -1,7 +1,6 @@
 package inmem
 
 import (
-	"murl/internal/mocks"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +12,7 @@ func TestNewInMemCore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCfg := mocks.NewMockInMemConfig(ctrl)
+	mockCfg := NewMockInMemConfig(ctrl)
 
 	t.Run("Success initialization", func(t *testing.T) {
 		const size byte = 4
@@ -43,7 +42,7 @@ func TestNewInMemCore(t *testing.T) {
 
 func TestInMemCore_GetShard(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCfg := mocks.NewMockInMemConfig(ctrl)
+	mockCfg := NewMockInMemConfig(ctrl)
 	mockCfg.EXPECT().ShardSize().Return(byte(2)).AnyTimes()
 
 	core, _ := NewInMemCore(mockCfg)
@@ -64,7 +63,7 @@ func TestInMemCore_GetShard(t *testing.T) {
 
 func TestInMemCore_ShardID(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCfg := mocks.NewMockInMemConfig(ctrl)
+	mockCfg := NewMockInMemConfig(ctrl)
 
 	// Создаем кор с 10 шардами
 	mockCfg.EXPECT().ShardSize().Return(byte(10))
@@ -94,7 +93,7 @@ func TestInMemCore_ShardID(t *testing.T) {
 
 func TestInMemCore_Size(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCfg := mocks.NewMockInMemConfig(ctrl)
+	mockCfg := NewMockInMemConfig(ctrl)
 	mockCfg.EXPECT().ShardSize().Return(byte(64))
 
 	core, _ := NewInMemCore(mockCfg)

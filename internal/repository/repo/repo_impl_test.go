@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/mocks"
 	"murl/internal/model/event"
 )
 
@@ -16,8 +15,8 @@ func TestRepo_On_EvAddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockLinks := mocks.NewMockRepoLinks(ctrl)
-	mockWAL := mocks.NewMockWAL(ctrl)
+	mockLinks := NewMockRepoLinks(ctrl)
+	mockWAL := NewMockWAL(ctrl)
 
 	r := &repo{
 		repoLinks: mockLinks,
@@ -59,8 +58,8 @@ func TestRepo_On_EvAddURL_ConflictNoWAL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockLinks := mocks.NewMockRepoLinks(ctrl)
-	mockWAL := mocks.NewMockWAL(ctrl)
+	mockLinks := NewMockRepoLinks(ctrl)
+	mockWAL := NewMockWAL(ctrl)
 
 	r := &repo{repoLinks: mockLinks, wal: mockWAL}
 
@@ -87,7 +86,7 @@ func TestRepo_On_EvGetURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockLinks := mocks.NewMockRepoLinks(ctrl)
+	mockLinks := NewMockRepoLinks(ctrl)
 	r := &repo{repoLinks: mockLinks}
 
 	ctx := context.Background()
@@ -112,8 +111,8 @@ func TestRepo_Close(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockWAL := mocks.NewMockWAL(ctrl)
-	mockCluster := mocks.NewMockPgCluster(ctrl)
+	mockWAL := NewMockWAL(ctrl)
+	mockCluster := NewMockPgCluster(ctrl)
 
 	r := &repo{
 		wal:       mockWAL,

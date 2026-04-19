@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/mocks"
 	"murl/internal/model"
 )
 
@@ -18,7 +17,7 @@ func TestJWTManager_GenerateAndVerify(t *testing.T) {
 	defer ctrl.Finish()
 
 	defaultTTL := time.Hour
-	mockCfg := mocks.NewMockJWTManagerConfig(ctrl)
+	mockCfg := NewMockJWTManagerConfig(ctrl)
 	mockCfg.EXPECT().JWTSecretKey().Return("secret").AnyTimes()
 	mockCfg.EXPECT().JWTTTL().Return(defaultTTL).AnyTimes()
 
@@ -43,7 +42,7 @@ func TestJWTManager_NeedRemaining(t *testing.T) {
 	defer ctrl.Finish()
 
 	defaultTTL := 100 * time.Minute // Для простоты счета 1/4 = 25 мин
-	mockCfg := mocks.NewMockJWTManagerConfig(ctrl)
+	mockCfg := NewMockJWTManagerConfig(ctrl)
 	mockCfg.EXPECT().JWTSecretKey().Return("secret").AnyTimes()
 	mockCfg.EXPECT().JWTTTL().Return(defaultTTL).AnyTimes()
 
@@ -88,7 +87,7 @@ func TestJWTManager_Validation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCfg := mocks.NewMockJWTManagerConfig(ctrl)
+	mockCfg := NewMockJWTManagerConfig(ctrl)
 	mockCfg.EXPECT().JWTSecretKey().Return("key").AnyTimes()
 	mockCfg.EXPECT().JWTTTL().Return(time.Minute).AnyTimes()
 	m, _ := NewJWT(mockCfg)

@@ -36,6 +36,9 @@ func (o *Auditlog) Register(s Subscriber) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.subscribers[s.GetID()] = s
+	slog.Info("audit observer Register",
+		slog.Any("id", s.GetID()),
+	)
 }
 
 func (o *Auditlog) UnRegister(s Subscriber) {
@@ -65,9 +68,6 @@ func (o *Auditlog) Stop() {
 }
 
 func (o *Auditlog) Notify(ctx context.Context, n domain.Notification) error {
-	slog.Info("audit observer Notify",
-		slog.Any("notification", n),
-	)
 	select {
 	case o.notifications <- n:
 		return nil

@@ -6,6 +6,8 @@ import (
 	"murl/internal/model/event"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=repo_mock_test.go -package=$GOPACKAGE
+
 var ErrInternalServerError = errors.New("internal server error")
 
 // Объявляем список используемых параметров конфига

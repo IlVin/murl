@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=jwtmanager_mock_test.go -package=$GOPACKAGE
+
 type JWTManagerConfig interface {
 	JWTSecretKey() string
 	JWTTTL() time.Duration

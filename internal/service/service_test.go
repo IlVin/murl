@@ -9,8 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/config"
-	"murl/internal/mocks" // Предполагаем, что моки Repo и Notifier лежат здесь
+	"murl/internal/config" // Предполагаем, что моки Repo и Notifier лежат здесь
 	"murl/internal/model/event"
 )
 
@@ -32,8 +31,8 @@ func TestService_AddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mocks.NewMockRepo(ctrl)
-	mockNotifier := mocks.NewMockAuditlogNotifier(ctrl) // Нужен мок нотификатора
+	mockRepo := NewMockRepo(ctrl)
+	mockNotifier := NewMockAuditlogNotifier(ctrl) // Нужен мок нотификатора
 
 	cfg := &mockSvcConfig{baseURL: "http://short.io"}
 	// В конструкторе теперь 4 параметра
@@ -63,8 +62,8 @@ func TestService_GetURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mocks.NewMockRepo(ctrl)
-	mockNotifier := mocks.NewMockAuditlogNotifier(ctrl)
+	mockRepo := NewMockRepo(ctrl)
+	mockNotifier := NewMockAuditlogNotifier(ctrl)
 
 	cfg := &mockSvcConfig{baseURL: "http://short.io"}
 	svc := NewService(context.Background(), cfg, mockRepo, mockNotifier)
@@ -117,7 +116,7 @@ func TestService_AddURL_BlockedDomain(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockNotifier := mocks.NewMockAuditlogNotifier(ctrl)
+	mockNotifier := NewMockAuditlogNotifier(ctrl)
 	cfg := &mockSvcConfig{baseURL: "http://murl.io"}
 	svc := NewService(context.Background(), cfg, nil, mockNotifier)
 
@@ -129,7 +128,7 @@ func TestService_Batch_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mocks.NewMockRepo(ctrl)
+	mockRepo := NewMockRepo(ctrl)
 	// Добавляем слеш в конце baseURL для чистоты,
 	// хотя url.Parse и JoinPath обычно справляются сами
 	cfg := &mockSvcConfig{baseURL: "http://s.io"}

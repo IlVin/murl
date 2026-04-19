@@ -8,6 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=pg_instance_mock_test.go     -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen                 -destination=pg_instance_pgx_mock_test.go -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
+
 // PgxPoolIface интерфейс, который ограничивает методы, передаваемые в коллбек
 type PgxPoolIface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)

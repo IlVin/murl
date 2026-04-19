@@ -14,6 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+//go:generate $GOPATH/bin/mockgen                               -destination=repo_links_pgx_mock_test.go         -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
+//go:generate $GOPATH/bin/mockgen -source=../pgc/pg_cluster.go  -destination=repo_links_pg_cluster_mock_test.go  -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../pgc/pg_instance.go -destination=repo_links_pg_instance_mock_test.go -package=$GOPACKAGE
+
 const sqlUpSert string = `
 WITH ins AS (
     INSERT INTO murl (url) VALUES ($1)

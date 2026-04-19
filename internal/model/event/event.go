@@ -12,6 +12,7 @@ type EvType int32
 
 // !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
 //go:generate $GOPATH/bin/stringer -type=EvType
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=event_mock_test.go -package=$GOPACKAGE
 
 // !!! [1] СЮДА ДОПИШИ НОВЫЙ ТИП КОНСТАНТЫ !!!
 // Возможные типы Event.

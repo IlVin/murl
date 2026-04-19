@@ -18,6 +18,9 @@ import (
 	"github.com/google/uuid"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=service_mock_test.go -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repository/repo.go -destination=service_repo_mock_test.go -package=$GOPACKAGE
+
 var ErrInvalidURLFormat = errors.New("invalid URL format")
 var ErrDomainIsBlocked = errors.New("domain is blocked")
 var ErrConflict = errors.New("URL is already shortened")

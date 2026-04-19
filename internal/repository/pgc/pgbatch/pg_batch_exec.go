@@ -12,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+//go:generate $GOPATH/bin/mockgen                           -destination=pg_batch_exec_pgx_mock_test.go         -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
+//go:generate $GOPATH/bin/mockgen -source=../pg_instance.go -destination=pg_batch_exec_pg_instance_mock_test.go -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE           -destination=pg_batch_exec_mock_test.go             -package=$GOPACKAGE
+
 // Константы для подсистемы батчинга
 const BatchBufSize int = 100
 const BatchLimit int = 3

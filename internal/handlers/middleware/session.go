@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=session_mock_test.go -package=$GOPACKAGE
+
 const (
 	cookieName string = "murl_session"
 )

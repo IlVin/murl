@@ -4,6 +4,8 @@ import (
 	"context"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=pg_cluster_mock_test.go -package=$GOPACKAGE
+
 // PgClusterConfig интерфейс конфига для пула шардов
 type PgClusterConfig interface {
 	ShardSize() byte

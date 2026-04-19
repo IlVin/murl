@@ -5,6 +5,8 @@ import (
 	"murl/internal/model/event"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=repo_links_mock_test.go -package=$GOPACKAGE
+
 type RepoLinks interface {
 	// UpSert записывает originalURL строку в шард БД и возвращает shortPath строку, признак конфликта и ошибку
 	UpSert(ctx context.Context, originalURL string) (shortPath string, conflictFlag bool, err error)

@@ -24,6 +24,8 @@ import (
 	goose "github.com/pressly/goose/v3"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=pg_instance_impl_mock_test.go -package=$GOPACKAGE
+
 const ProbeInterval int64 = 5
 
 // Отрываем PgInterface от pgxpool.Pool таким враппером

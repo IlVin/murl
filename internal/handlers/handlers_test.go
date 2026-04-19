@@ -13,7 +13,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"murl/internal/config"
-	"murl/internal/mocks"
 	"murl/internal/model/event"
 	"murl/internal/service"
 )
@@ -31,7 +30,7 @@ func TestHandlers_AddURL_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	mockSvc := NewMockMicroURLService(ctrl)
 	cfg := &mockSvcConfig{keySession: "keySession"}
 	h := NewHandlers(cfg, mockSvc)
 
@@ -59,7 +58,7 @@ func TestHandlers_AddURL_Conflict(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	mockSvc := NewMockMicroURLService(ctrl)
 	cfg := &mockSvcConfig{keySession: "keySession"}
 	h := NewHandlers(cfg, mockSvc)
 
@@ -80,7 +79,7 @@ func TestHandlers_APIShortenBatch_Streaming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	mockSvc := NewMockMicroURLService(ctrl)
 	cfg := &mockSvcConfig{keySession: "keySession"}
 	h := NewHandlers(cfg, mockSvc)
 
@@ -121,7 +120,7 @@ func TestHandlers_GetURL_Redirect(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	mockSvc := NewMockMicroURLService(ctrl)
 	cfg := &mockSvcConfig{keySession: "keySession"}
 	h := NewHandlers(cfg, mockSvc)
 
@@ -143,7 +142,7 @@ func TestHandlers_Ping_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := mocks.NewMockMicroURLService(ctrl)
+	mockSvc := NewMockMicroURLService(ctrl)
 	cfg := &mockSvcConfig{keySession: "keySession"}
 	h := NewHandlers(cfg, mockSvc)
 

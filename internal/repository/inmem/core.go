@@ -15,6 +15,8 @@ import (
 //
 // =============================================
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=core_mock_test.go -package=$GOPACKAGE
+
 type InMemConfig interface {
 	ShardSize() byte
 }

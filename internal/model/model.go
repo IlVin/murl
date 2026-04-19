@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=model_mock_test.go -package=$GOPACKAGE
+
 type Session struct {
 	ID  uuid.UUID `json:"id"`
 	TTL time.Time `json:"ttl"`

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/mocks"
 	"murl/internal/repository/pgc"
 	"murl/internal/repository/pgc/backoff"
 	"murl/internal/repository/pgc/fcounter"
@@ -19,7 +18,7 @@ func TestPgInstance_Tx_PoolBeginError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPool := mocks.NewMockpgxPoolDriverIface(ctrl)
+	mockPool := NewMockpgxPoolDriverIface(ctrl)
 
 	h := &pgInstance{
 		pgPool:   mockPool,
@@ -46,7 +45,7 @@ func TestPgInstance_PgPool_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPool := mocks.NewMockpgxPoolDriverIface(ctrl)
+	mockPool := NewMockpgxPoolDriverIface(ctrl)
 
 	h := &pgInstance{
 		pgPool:   mockPool,
@@ -70,7 +69,7 @@ func TestPgInstance_CircuitBreaker_Activation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPool := mocks.NewMockpgxPoolDriverIface(ctrl)
+	mockPool := NewMockpgxPoolDriverIface(ctrl)
 
 	// 1 ошибка и мы Offline
 	h := &pgInstance{

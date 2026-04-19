@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"murl/internal/mocks"          // путь к сгенерированным мокам
+	// путь к сгенерированным мокам
 	"murl/internal/repository/pgc" // путь к вашим интерфейсам
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,7 +19,7 @@ func TestBatchExec_Add_TriggerFlush(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPg := mocks.NewMockPgInstance(ctrl)
+	mockPg := NewMockPgInstance(ctrl)
 	wg := &sync.WaitGroup{}
 
 	// Ожидаем, что транзакция вызовется один раз, когда наберется BatchBufSize
@@ -43,9 +43,9 @@ func TestBatchExec_Flush_Manual(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPg := mocks.NewMockPgInstance(ctrl)
-	mockTx := mocks.NewMockPgxTxIface(ctrl)
-	mockBr := mocks.NewMockBatchResults(ctrl) // Нужен мок для pgx.BatchResults
+	mockPg := NewMockPgInstance(ctrl)
+	mockTx := NewMockPgxTxIface(ctrl)
+	mockBr := NewMockBatchResults(ctrl) // Нужен мок для pgx.BatchResults
 
 	wg := &sync.WaitGroup{}
 	be := NewBatchExec(mockPg, nil, wg)
@@ -73,7 +73,7 @@ func TestBatchExec_TransactionError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPg := mocks.NewMockPgInstance(ctrl)
+	mockPg := NewMockPgInstance(ctrl)
 	wg := &sync.WaitGroup{}
 	be := NewBatchExec(mockPg, nil, wg)
 
@@ -92,7 +92,7 @@ func TestBatchExec_LimiterBlock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPg := mocks.NewMockPgInstance(ctrl)
+	mockPg := NewMockPgInstance(ctrl)
 	// Имитируем долгую транзакцию
 	mockPg.EXPECT().Tx(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, f func(context.Context, pgc.PgxTxIface) error) error {

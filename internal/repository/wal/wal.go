@@ -12,6 +12,8 @@ import (
 	"sync"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=wal_mock_test.go -package=$GOPACKAGE
+
 type WAL interface {
 	Push(e event.Event) error
 	Close() error

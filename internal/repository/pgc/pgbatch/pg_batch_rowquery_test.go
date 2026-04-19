@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"murl/internal/mocks"
 	"murl/internal/repository/pgc"
 
 	"github.com/stretchr/testify/assert"
@@ -23,11 +22,11 @@ func TestPgBatchRowQuery_AllScenarios(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPg1 := mocks.NewMockPgInstance(ctrl)
-	mockPg2 := mocks.NewMockPgInstance(ctrl)
-	mockTx := mocks.NewMockPgxTxIface(ctrl)
-	mockBR := mocks.NewMockBatchResults(ctrl)
-	mockRow := mocks.NewMockRow(ctrl)
+	mockPg1 := NewMockPgInstance(ctrl)
+	mockPg2 := NewMockPgInstance(ctrl)
+	mockTx := NewMockPgxTxIface(ctrl)
+	mockBR := NewMockBatchResults(ctrl)
+	mockRow := NewMockRow(ctrl)
 
 	// Настройка базового поведения String() для шардирования
 	mockPg1.EXPECT().String().Return("db-1").AnyTimes()

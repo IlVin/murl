@@ -13,6 +13,11 @@ import (
 	"murl/internal/repository/wal"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=../pgc/instance/pg_instance_impl.go -destination=repo_impl_pg_instance_impl_mock_test.go -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../wal/wal.go                       -destination=repo_impl_wal_mock_test.go              -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../pgc/pg_cluster.go                -destination=repo_impl_pg_cluster_mock_test.go       -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repo_links.go                    -destination=repo_impl_repo_links_mock_test.go       -package=$GOPACKAGE
+
 const (
 	RepoInMemory string = "InMemory"
 	RepoPostgres string = "PgDB"

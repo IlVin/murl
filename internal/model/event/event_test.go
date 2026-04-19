@@ -1,4 +1,4 @@
-package event_test
+package event
 
 import (
 	"testing"
@@ -7,26 +7,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-
-	"murl/internal/mocks"
-	"murl/internal/model/event"
 )
 
 func TestMakeAndGetPayload(t *testing.T) {
 	// Данные для теста
-	payload := event.PayloadAddURL{
+	payload := PayloadAddURL{
 		OriginalURL: "https://google.com",
 		ShortURL:    "http://short/1",
 	}
 
 	// 1. Тестируем создание события
-	ev, err := event.MakeEvent(payload, nil)
+	ev, err := MakeEvent(payload, nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, ev.GetID())
-	assert.Equal(t, event.EvAddURL, ev.GetType())
+	assert.Equal(t, EvAddURL, ev.GetType())
 
 	// 2. Тестируем извлечение Payload (Generic)
-	extracted, err := event.GetPayload[event.PayloadAddURL](ev)
+	extracted, err := GetPayload[PayloadAddURL](ev)
 	require.NoError(t, err)
 	assert.Equal(t, payload.OriginalURL, extracted.OriginalURL)
 }
@@ -37,32 +34,32 @@ func TestEventChain(t *testing.T) {
 
 	// Создаем родительское событие
 	parentID := uuid.New()
-	mockParent := mocks.NewMockEvent(ctrl)
+	mockParent := NewMockEvent(ctrl)
 	mockParent.EXPECT().GetID().Return(parentID).AnyTimes()
 	mockParent.EXPECT().GetParents().Return([]uuid.UUID{}).AnyTimes()
 
 	// Создаем дочернее событие через MakeEvent
-	payload := event.PayloadGetURL{ShortURL: "short"}
-	childEv, err := event.MakeEvent(payload, mockParent)
+	payload := PayloadGetURL{ShortURL: "short"}
+	childEv, err := MakeEvent(payload, mockParent)
 
 	require.NoError(t, err)
 	assert.Contains(t, childEv.GetParents(), parentID)
 }
 
 func TestSerialization(t *testing.T) {
-	payload := event.PayloadAddURLBySessionID{
+	payload := PayloadAddURLBySessionID{
 		OriginalURL: "https://yandex.ru",
 		SessionID:   uuid.New(),
 	}
 
-	ev, _ := event.MakeEvent(payload, nil)
+	ev, _ := MakeEvent(payload, nil)
 
 	// Сериализация
 	data, err := ev.Serialize()
 	require.NoError(t, err)
 
 	// Десериализация (Parse)
-	parsedEv, err := event.Parse(data)
+	parsedEv, err := Parse(data)
 	require.NoError(t, err)
 
 	assert.Equal(t, ev.GetID(), parsedEv.GetID())
@@ -71,11 +68,11 @@ func TestSerialization(t *testing.T) {
 }
 
 func TestTypeMismatch(t *testing.T) {
-	payload := event.PayloadAddURL{OriginalURL: "url"}
-	ev, _ := event.MakeEvent(payload, nil)
+	payload := PayloadAddURL{OriginalURL: "url"}
+	ev, _ := MakeEvent(payload, nil)
 
 	// Пытаемся достать неправильный тип payload
-	_, err := event.GetPayload[event.PayloadBatch](ev)
+	_, err := GetPayload[PayloadBatch](ev)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "type mismatch")
 }

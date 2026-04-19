@@ -17,6 +17,8 @@ import (
 	"github.com/bcicen/jstream"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=handlers_mock_test.go -package=$GOPACKAGE
+
 // Объявляем список используемых параметров конфига
 type HandlersConfig interface {
 	KeySession() config.KeySession

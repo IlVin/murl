@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/mocks"
 	"murl/internal/repository/pgc"
 )
 
@@ -35,7 +34,7 @@ func TestPgCluster_ShardingLogic(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockInst := mocks.NewMockPgInstance(ctrl)
+	mockInst := NewMockPgInstance(ctrl)
 	shardSize := byte(5)
 
 	// Создаем кластер вручную, чтобы подсунуть мок инстанса
@@ -65,8 +64,8 @@ func TestPgCluster_Ping_StopOnFirstError(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Эмулируем два разных инстанса (хотя в текущей имплементации он один)
-	mockInst1 := mocks.NewMockPgInstance(ctrl)
-	mockInst2 := mocks.NewMockPgInstance(ctrl)
+	mockInst1 := NewMockPgInstance(ctrl)
+	mockInst2 := NewMockPgInstance(ctrl)
 
 	c := &pgCluster{
 		instances: []pgc.PgInstance{mockInst1, mockInst2},
@@ -86,8 +85,8 @@ func TestPgCluster_Close_AllInstances(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockInst1 := mocks.NewMockPgInstance(ctrl)
-	mockInst2 := mocks.NewMockPgInstance(ctrl)
+	mockInst1 := NewMockPgInstance(ctrl)
+	mockInst2 := NewMockPgInstance(ctrl)
 
 	c := &pgCluster{
 		instances: []pgc.PgInstance{mockInst1, mockInst2},
@@ -105,7 +104,7 @@ func TestPgCluster_RunMigrations_ContextCancel(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockInst := mocks.NewMockPgInstance(ctrl)
+	mockInst := NewMockPgInstance(ctrl)
 	mockInst.EXPECT().String().Return("localhost:5432").AnyTimes()
 
 	c := &pgCluster{

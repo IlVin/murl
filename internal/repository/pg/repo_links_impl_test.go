@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"murl/internal/mocks"
 	"murl/internal/model/event"
 	"murl/internal/repository/pgc"
 )
@@ -18,9 +17,9 @@ func TestPgRepoLinks_UpSert_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCluster := mocks.NewMockPgCluster(ctrl)
-	mockInstance := mocks.NewMockPgInstance(ctrl)
-	mockRow := mocks.NewMockRow(ctrl)
+	mockCluster := NewMockPgCluster(ctrl)
+	mockInstance := NewMockPgInstance(ctrl)
+	mockRow := NewMockRow(ctrl)
 
 	repo := NewPgRepoLinks(mockCluster)
 	url := "https://example.com"
@@ -31,7 +30,7 @@ func TestPgRepoLinks_UpSert_Success(t *testing.T) {
 
 	mockInstance.EXPECT().Tx(ctx, gomock.Any()).DoAndReturn(
 		func(ctx context.Context, cb func(context.Context, pgc.PgxTxIface) error) error {
-			mockTx := mocks.NewMockPgxTxIface(ctrl)
+			mockTx := NewMockPgxTxIface(ctrl)
 			mockTx.EXPECT().QueryRow(ctx, sqlUpSert, url).Return(mockRow)
 
 			// ИСПРАВЛЕНИЕ ЗДЕСЬ: Scan принимает []any
@@ -57,9 +56,9 @@ func TestPgRepoLinks_Select_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCluster := mocks.NewMockPgCluster(ctrl)
-	mockInstance := mocks.NewMockPgInstance(ctrl)
-	mockRow := mocks.NewMockRow(ctrl)
+	mockCluster := NewMockPgCluster(ctrl)
+	mockInstance := NewMockPgInstance(ctrl)
+	mockRow := NewMockRow(ctrl)
 
 	repo := NewPgRepoLinks(mockCluster)
 	// Валидный shortPath для ShardID=0, Idx=1
@@ -71,7 +70,7 @@ func TestPgRepoLinks_Select_Success(t *testing.T) {
 
 	mockInstance.EXPECT().PgPool(ctx, gomock.Any()).DoAndReturn(
 		func(ctx context.Context, cb func(context.Context, pgc.PgxPoolIface) error) error {
-			mockPool := mocks.NewMockPgxPoolIface(ctrl)
+			mockPool := NewMockPgxPoolIface(ctrl)
 			mockPool.EXPECT().QueryRow(ctx, sqlSelect, uint64(1)).Return(mockRow)
 			mockRow.EXPECT().Scan(gomock.Any()).SetArg(0, "https://original.url").Return(nil)
 
@@ -88,7 +87,7 @@ func TestPgRepoLinks_BatchUpSert_ErrorHandling(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockCluster := mocks.NewMockPgCluster(ctrl)
+	mockCluster := NewMockPgCluster(ctrl)
 	repo := NewPgRepoLinks(mockCluster)
 
 	// Тестируем ситуацию, когда GetShard вернул ошибку

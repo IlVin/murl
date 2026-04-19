@@ -13,6 +13,8 @@ import (
 	"sync"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=../pg_instance.go -destination=pg_cluster_impl_pg_instance_mock_test.go -package=$GOPACKAGE
+
 // pgCluster
 type pgCluster struct {
 	batchLimiter chan bool

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"murl/internal/config"
-	"murl/internal/mocks"
 	"murl/internal/model"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +16,7 @@ func TestWithSession_Integration(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	// 1. Мокаем конфиг, который запрашивает NewJWT внутри миддлвари
-	mockCfg := mocks.NewMockSessionConfig(ctrl)
+	mockCfg := NewMockSessionConfig(ctrl)
 	// Настраиваем обязательные параметры для инициализации jwtmanager
 	secret := "secret-key-32-chars-length-needed"
 	ttl := time.Hour
