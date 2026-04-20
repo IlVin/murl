@@ -21,5 +21,5 @@ type RepoConfig interface {
 type Repo interface {
 	On(ctx context.Context, e event.Event) (event.Event, error)
 	Ping(ctx context.Context) error
-	Close() error
+	Close(ctx context.Context) error
 }

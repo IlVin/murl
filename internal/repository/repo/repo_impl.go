@@ -4,19 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"murl/internal/adapters/pgc"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/inmem"
 	"murl/internal/repository/pg"
-	"murl/internal/repository/pgc"
-	"murl/internal/repository/pgc/pgcluster"
 	"murl/internal/repository/wal"
 )
 
-//go:generate $GOPATH/bin/mockgen -source=../pgc/instance/pg_instance_impl.go -destination=repo_impl_pg_instance_impl_mock_test.go -package=$GOPACKAGE
-//go:generate $GOPATH/bin/mockgen -source=../wal/wal.go                       -destination=repo_impl_wal_mock_test.go              -package=$GOPACKAGE
-//go:generate $GOPATH/bin/mockgen -source=../pgc/pg_cluster.go                -destination=repo_impl_pg_cluster_mock_test.go       -package=$GOPACKAGE
-//go:generate $GOPATH/bin/mockgen -source=../repo_links.go                    -destination=repo_impl_repo_links_mock_test.go       -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../../adapters/pgc/pgc.go -destination=repo_impl_pgc_mock_test.go          -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../wal/wal.go             -destination=repo_impl_wal_mock_test.go          -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repo_links.go          -destination=repo_impl_repo_links_mock_test.go   -package=$GOPACKAGE
 
 const (
 	RepoInMemory string = "InMemory"
@@ -24,7 +23,7 @@ const (
 )
 
 type repo struct {
-	pgCluster            pgc.PgCluster
+	pgInst               pgc.PgInstance
 	memCore              *inmem.InMemCore
 	repoLinksBySessionID repository.RepoLinksBySessionID
 	repoLinks            repository.RepoLinks
@@ -38,15 +37,15 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 	r = &repo{}
 
 	if cfg.RepoDrv() == RepoPostgres {
-		r.pgCluster, err = pgcluster.NewPgCluster(ctx, cfg, nil)
+		r.pgInst, err = pgc.NewPgConnector(ctx, cfg.DBDSN())
 		if err != nil {
 			return nil, err
 		}
-		if err := r.pgCluster.RunMigrations(ctx); err != nil {
+		if err := r.pgInst.RunMigrations(ctx); err != nil {
 			return nil, fmt.Errorf("run migrations fail: %w", err)
 		}
-		r.repoLinks = pg.NewPgRepoLinks(r.pgCluster)
-		r.repoLinksBySessionID = pg.NewPgRepoLinksBySessionID(r.pgCluster)
+		r.repoLinks = pg.NewPgRepoLinks(r.pgInst)
+		r.repoLinksBySessionID = pg.NewPgRepoLinksBySessionID(r.pgInst)
 	} else if cfg.RepoDrv() == RepoInMemory {
 		r.memCore, err = inmem.NewInMemCore(cfg)
 		if err != nil {
@@ -60,6 +59,9 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 
 	if cfg.EventStoragePath() != "" {
 		// Загрузка событий из WAL
+		slog.Info("Load Events from WAL",
+			slog.String("path", cfg.EventStoragePath()),
+		)
 		walCtx := context.Background()
 		ch, err := wal.LoadWAL(walCtx, cfg.EventStoragePath())
 		if err != nil {
@@ -80,25 +82,28 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 	return r, nil
 }
 
-func (r *repo) Close() error {
+func (r *repo) Close(ctx context.Context) error {
 	r.wal.Close()
 
-	if r.pgCluster == nil {
+	if r.pgInst == nil {
 		return nil
 	}
 
-	return r.pgCluster.Close()
+	return r.pgInst.Close(ctx)
 }
 
 func (r *repo) Ping(ctx context.Context) error {
-	if r.pgCluster == nil {
+	if r.pgInst == nil {
 		return nil
 	}
 
-	return r.pgCluster.Ping(ctx)
+	return r.pgInst.Ping(ctx)
 }
 
 func (r *repo) On(ctx context.Context, e event.Event) (event.Event, error) {
+	slog.Info("Event",
+		slog.String("e.Type", e.GetType().String()),
+	)
 	switch e.GetType() {
 	case event.EvAddURL:
 		return r.evAddURL(ctx, e)
@@ -204,7 +209,7 @@ func (r *repo) evDeleteURLBySessionID(ctx context.Context, e event.Event) (resEv
 	}
 
 	// Отложенное удаление реализовано только для Pg
-	if r.pgCluster == nil {
+	if r.pgInst == nil {
 		return nil, errors.New("DeleteURLBySessionID is not implemented")
 	}
 

@@ -122,17 +122,17 @@ func (m *MockRepo) EXPECT() *MockRepoMockRecorder {
 }
 
 // Close mocks base method.
-func (m *MockRepo) Close() error {
+func (m *MockRepo) Close(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Close")
+	ret := m.ctrl.Call(m, "Close", ctx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Close indicates an expected call of Close.
-func (mr *MockRepoMockRecorder) Close() *gomock.Call {
+func (mr *MockRepoMockRecorder) Close(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRepo)(nil).Close))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRepo)(nil).Close), ctx)
 }
 
 // On mocks base method.

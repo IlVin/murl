@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"murl/internal/adapters"
+	"murl/internal/adapters/audit"
 	"murl/internal/config"
 	"murl/internal/handlers"
 	"murl/internal/model/auditlog"
@@ -54,14 +54,14 @@ func run() error {
 	slog.Info("created auditlog observer")
 
 	// Добавляем потребителей, которые запишут нотификацию во всякие разные внешние места
-	adapters.AddAuditConsumers(cfg, auditlog)
+	audit.AddAuditConsumers(cfg, auditlog)
 
 	// Репозиторий
 	repo, err := repo.NewRepo(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize the repository object: %w", err)
 	}
-	defer repo.Close()
+	defer repo.Close(ctx)
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
 	srv := service.NewService(ctx, cfg, repo, auditlog)

@@ -2,137 +2,117 @@ package pg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"murl/internal/adapters/pgc"
 	"murl/internal/model"
 	"murl/internal/model/event"
 	"murl/internal/repository"
-	"murl/internal/repository/pgc"
-
-	"github.com/jackc/pgx/v5"
 )
 
-const sqlUpSertBySessionID string = `
-WITH ins AS (
-    INSERT INTO murl (url, session_id) VALUES ($1, $2)
-    ON CONFLICT (url) DO NOTHING
-    RETURNING id
-)
-SELECT id, 'f'::boolean AS conflict FROM ins
-UNION ALL
-SELECT id, 't'::boolean AS conflict FROM murl WHERE url = $1
-LIMIT 1;
-`
+type UpSertBySessIDResult struct {
+	Idx uint64
+	Cf  bool
+}
 
-const sqlDelBySessionID string = `
-UPDATE murl
-SET deleted = 't'::boolean
-WHERE id = $1 AND session_id = $2
-`
+var sqlUpSertBySessionID = pgc.NewQuery(`
+	WITH ins AS (
+		INSERT INTO murl (url, session_id) VALUES ($1, $2)
+		ON CONFLICT (url) DO NOTHING
+		RETURNING id
+	)
+	SELECT id, 'f'::boolean AS conflict FROM ins
+	UNION ALL
+	SELECT id, 't'::boolean AS conflict FROM murl WHERE url = $1
+	LIMIT 1;
+`,
+	func(u *UpSertBySessIDResult) []any {
+		return []any{&u.Idx, &u.Cf}
+	},
+).AsWrite()
 
-const sqlSetBySessionID string = `
+var sqlDelBySessionID = pgc.NewCommand(`
+	UPDATE murl
+	SET deleted = 't'::boolean
+	WHERE id = $1 AND session_id = $2
+`).AsWrite()
+
+var sqlSetBySessionID = pgc.NewCommand(`
 	INSERT INTO murl (id, url, session_id)
 	VALUES ($1, $2, $3)
 	ON CONFLICT (id)
 	DO UPDATE SET url = EXCLUDED.url, session_id = EXCLUDED.session_id;
-`
-const sqlSelectAllBySessionID string = `
-	SELECT id, url FROM murl
-	WHERE session_id = $1;
-`
+`).AsWrite()
 
-type PgRepoLinksBySessionID struct {
-	cluster pgc.PgCluster
+type SelectAllBySessionIDResult struct {
+	Idx         uint64
+	OriginalURL string
 }
 
-func NewPgRepoLinksBySessionID(cluster pgc.PgCluster) repository.RepoLinksBySessionID {
+var sqlSelectAllBySessionID = pgc.NewQuery(`
+	SELECT id, url FROM murl
+	WHERE session_id = $1;
+`,
+	func(u *SelectAllBySessionIDResult) []any {
+		return []any{&u.Idx, &u.OriginalURL}
+	},
+).AsRead()
+
+type PgRepoLinksBySessionID struct {
+	inst pgc.PgInstance
+}
+
+func NewPgRepoLinksBySessionID(inst pgc.PgInstance) repository.RepoLinksBySessionID {
 	return &PgRepoLinksBySessionID{
-		cluster: cluster,
+		inst: inst,
 	}
 }
 
 // UpSert записывает originalURL строку в шард БД и возвращает shortPath строку, признак конфликта и ошибку
 func (s *PgRepoLinksBySessionID) UpSert(ctx context.Context, sessionID string, originalURL string) (string, bool, error) {
-	shardID := s.cluster.ShardID(sessionID)
-	shard, err := s.cluster.GetShard(shardID)
+	shardID := model.ShardID(sessionID, ClusterSz)
+
+	res, err := pgc.FetchRow(ctx, s.inst, sqlUpSertBySessionID, originalURL, sessionID)
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSertBySessionID, err)
 	}
-
-	var idx uint64
-	var cf bool
-
-	errTx := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
-		return tx.QueryRow(ctx, sqlUpSertBySessionID, originalURL, sessionID).Scan(&idx, &cf)
-	})
-	if errTx != nil {
-		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSertBySessionID, errTx)
-	}
-	shortPath, err := model.MakeShortPath(shardID, idx)
+	shortPath, err := model.MakeShortPath(shardID, res.Idx)
 	if err != nil {
 		return "", false, fmt.Errorf("make short path fail: %w", err)
 	}
-	return shortPath, cf, nil
+	return shortPath, res.Cf, nil
 }
 
 func (s *PgRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID string) ([]event.PayloadURLItem, error) {
 	result := make([]event.PayloadURLItem, 0, 100)
 
-	shardID := s.cluster.ShardID(sessionID)
-	shard, err := s.cluster.GetShard(shardID)
-	if err != nil {
-		return result, err
-	}
+	shardID := model.ShardID(sessionID, ClusterSz)
 
-	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
-		rows, err := p.Query(ctx, sqlSelectAllBySessionID, sessionID)
+	for res, err := range pgc.Fetch(ctx, s.inst, sqlSelectAllBySessionID, sessionID) {
 		if err != nil {
-			return err
+			return result, fmt.Errorf("failed to execute query (%s): %w", sqlSelectAllBySessionID, err)
 		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var idx uint64
-			var originalURL string
-			err := rows.Scan(&idx, &originalURL)
-			if err != nil {
-				return err
-			}
-			shortPath, err := model.MakeShortPath(shardID, idx)
-			if err != nil {
-				return err
-			}
-			result = append(result, event.PayloadURLItem{
-				OriginalURL: originalURL,
-				ShortURL:    shortPath,
-			})
+		shortPath, err := model.MakeShortPath(shardID, res.Idx)
+		if err != nil {
+			return result, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query (%s): %w", sqlSelectAllBySessionID, err)
+		result = append(result, event.PayloadURLItem{
+			OriginalURL: res.OriginalURL,
+			ShortURL:    shortPath,
+		})
 	}
+
 	slog.Info("SelectAll", slog.Any("result", result))
 	return result, nil
 }
 
 func (s *PgRepoLinksBySessionID) Set(ctx context.Context, sessionID string, originalURL string, shortPath string) error {
-	shardID, idx, err := model.ParseShortPath(shortPath)
+	_, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
 		return fmt.Errorf("invalid format shortPath: %w", err)
 	}
 
-	shard, err := s.cluster.GetShard(shardID)
-	if err != nil {
-		return fmt.Errorf("shardID [%d] out of range [0, .., %d)", shardID, s.cluster.Size())
-	}
-
-	err = shard.PgPool(ctx, func(ctx context.Context, p pgc.PgxPoolIface) error {
-		_, err = p.Exec(ctx, sqlSetBySessionID, idx, originalURL, sessionID)
-		return err
-	})
-	if err != nil {
+	if _, err := pgc.Exec(ctx, s.inst, sqlSetBySessionID, idx, originalURL, sessionID); err != nil {
 		return fmt.Errorf("failed to execute query (%s): %w", sqlSetBySessionID, err)
 	}
 
@@ -141,20 +121,27 @@ func (s *PgRepoLinksBySessionID) Set(ctx context.Context, sessionID string, orig
 
 // BatchDeleteBySessionID - Создает отложенный батч на удаление URL по SessionID
 func (s *PgRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessionID string, batch event.PayloadDeleteURLBySessionID) error {
-	shardID := s.cluster.ShardID(sessionID)
-	batcher, err := s.cluster.GetBatch(shardID)
-	if err != nil {
-		return err
-	}
 
-	for _, shortURL := range batch.ShortURLs {
-		_, idx, err := model.ParseShortPath(shortURL)
-		if err != nil {
-			return fmt.Errorf("invalid format ShortURL (%s): %w", shortURL, err)
+	// Фоновый батчер
+	batcherDelBySessionID := pgc.NewPgBatcher[int](context.WithoutCancel(ctx), s.inst, sqlDelBySessionID)
+
+	// Запихиваем в батчер запросы в параллельной горутине
+	go func() {
+		defer batcherDelBySessionID.Close()
+
+		for i := range batch.ShortURLs {
+			shortURL := batch.ShortURLs[i]
+			_, idx, err := model.ParseShortPath(shortURL)
+			if err != nil {
+				continue
+			}
+
+			batcherDelBySessionID.Requests() <- pgc.BatchEntry[int]{
+				Args: []any{idx, sessionID},
+				Ctx:  i, // Прокидываем индекс как контекст
+			}
 		}
-
-		batcher.Add(sqlDelBySessionID, []any{idx, sessionID})
-	}
+	}()
 
 	return nil
 }
@@ -164,81 +151,68 @@ func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID stri
 		return batch, nil
 	}
 
-	// 1. Все записи одной сессии гарантированно попадают в один шард
-	shardID := s.cluster.ShardID(sessionID)
-	shard, err := s.cluster.GetShard(shardID)
-	if err != nil {
+	sID := model.ShardID(sessionID, ClusterSz)
+
+	batcherUpSert := pgc.NewPgBatcher[int](ctx, s.inst, sqlUpSertBySessionID)
+	// Запихиваем в батчер запросы в параллельной горутине
+	go func() {
+		defer batcherUpSert.Close()
+
 		for i := range batch.Batch {
-			if batch.Batch[i].Err != "" {
-				batch.Batch[i].Err = errors.Join(errors.New(batch.Batch[i].Err), err).Error()
-			} else {
-				batch.Batch[i].Err = err.Error()
+			batcherUpSert.Requests() <- pgc.BatchEntry[int]{
+				Args: []any{batch.Batch[i].OriginalURL, sessionID},
+				Ctx:  i, // Прокидываем индекс как контекст
 			}
 		}
-		return batch, fmt.Errorf("get shard fail: %w", err)
+	}()
+
+	// Собираем результаты
+	for res := range batcherUpSert.Results() {
+		i := res.Ctx
+		// Обрабатываем ошибку конкретной записи
+		if res.Err != nil {
+			batch.Batch[i].Err = ErrInternalServerError.Error()
+			continue
+		}
+		sPath, err := model.MakeShortPath(sID, res.Data.Idx)
+		if err != nil {
+			batch.Batch[i].Err = ErrInternalServerError.Error()
+			continue
+		}
+		batch.Batch[i].ShortURL = sPath
 	}
 
-	// 2. Подготавливаем нативный pgx батч
-	pgxBatch := &pgx.Batch{}
-	for i := range batch.Batch {
-		if batch.Batch[i].ShortURL != "" {
-			// Режим Set
+	// Ждем когда батчер отработает
+	<-batcherUpSert.Results()
+
+	return batch, nil
+}
+
+func (s *PgRepoLinksBySessionID) BatchSet(ctx context.Context, sessionID string, batch event.PayloadBatch) (event.PayloadBatch, error) {
+	if len(batch.Batch) == 0 {
+		return batch, nil
+	}
+
+	batcherSet := pgc.NewPgBatcher[int](ctx, s.inst, sqlSetBySessionID)
+	// Запихиваем в батчер запросы в параллельной горутине
+	go func() {
+		defer batcherSet.Close()
+
+		for i := range batch.Batch {
 			_, idx, err := model.ParseShortPath(batch.Batch[i].ShortURL)
 			if err != nil {
-				// Если формат плохой, помечаем ошибкой и пропускаем
 				batch.Batch[i].Err = err.Error()
 				continue
 			}
-			pgxBatch.Queue(sqlSetBySessionID, idx, batch.Batch[i].OriginalURL, sessionID)
-		} else {
-			// Режим Add
-			pgxBatch.Queue(sqlUpSertBySessionID, batch.Batch[i].OriginalURL, sessionID)
-		}
-	}
-
-	// 3. Выполняем батч в транзакции
-	errTx := shard.Tx(ctx, func(ctx context.Context, tx pgc.PgxTxIface) error {
-		br := tx.SendBatch(ctx, pgxBatch)
-		defer br.Close()
-
-		for i := range batch.Batch {
-			// Пропускаем те, что уже с ошибкой парсинга
-			if batch.Batch[i].Err != "" {
-				continue
-			}
-
-			if batch.Batch[i].ShortURL == "" {
-				// Читаем результат для sqlUpSertBySessionID (id, conflict)
-				var idx uint64
-				var cf bool
-				if err := br.QueryRow().Scan(&idx, &cf); err != nil {
-					return fmt.Errorf("scan upsert result fail (index %d): %w", i, err)
-				}
-
-				shortPath, err := model.MakeShortPath(shardID, idx)
-				if err != nil {
-					return fmt.Errorf("make short path fail: %w", err)
-				}
-				batch.Batch[i].ShortURL = shortPath
-				batch.Batch[i].ConflictFlag = cf
-			} else {
-				// Для sqlSetBySessionID просто проверяем выполнение
-				if _, err := br.Exec(); err != nil {
-					return fmt.Errorf("exec set fail (index %d): %w", i, err)
-				}
+			batcherSet.Requests() <- pgc.BatchEntry[int]{
+				Args: []any{idx, batch.Batch[i].OriginalURL, sessionID},
+				Ctx:  i, // Прокидываем индекс как контекст
 			}
 		}
-		return nil
-	})
+	}()
 
-	if errTx != nil {
-		for i := range batch.Batch {
-			if batch.Batch[i].Err != "" {
-				batch.Batch[i].Err = errTx.Error()
-			}
-		}
-		return batch, fmt.Errorf("batch execution failed: %w", errTx)
-	}
+	// Ждем когда батчер отработает
+	<-batcherSet.Results()
 
 	return batch, nil
 }
