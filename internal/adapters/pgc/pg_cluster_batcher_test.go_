@@ -1,0 +1,77 @@
+package pgc
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
+)
+
+func TestPgClusterBatcher_Complex(t *testing.T) {
+	type User struct{ ID int }
+	query := NewQuery("INSERT INTO users (id) VALUES ($1) RETURNING id", func(u *User) []any {
+		return []any{&u.ID}
+	})
+
+	t.Run("Success: Routing and Fan-In All()", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockCluster := NewMockPgCluster(ctrl)
+		mockShard0 := NewMockPgInstance(ctrl)
+		mockShard1 := NewMockPgInstance(ctrl)
+
+		mockCluster.EXPECT().Size().Return(byte(2)).AnyTimes()
+		mockCluster.EXPECT().GetShard(byte(0)).Return(mockShard0, nil).AnyTimes()
+		mockCluster.EXPECT().GetShard(byte(1)).Return(mockShard1, nil).AnyTimes()
+		mockShard0.EXPECT().WithMeterProvider(gomock.Any()).Return(mockShard0).AnyTimes()
+		mockShard1.EXPECT().WithMeterProvider(gomock.Any()).Return(mockShard1).AnyTimes()
+
+		cb := NewPgClusterBatcher(context.Background(), mockCluster, query)
+
+		mockCluster.EXPECT().ShardID("a").Return(byte(0)).AnyTimes()
+		mockCluster.EXPECT().ShardID("b").Return(byte(1)).AnyTimes()
+
+		mockShard0.EXPECT().SendBatch(gomock.Any(), query, [][]any{{1}}).
+			Return(func(yield func(any, error) bool) { yield(&User{ID: 1}, nil) })
+		mockShard1.EXPECT().SendBatch(gomock.Any(), query, [][]any{{2}}).
+			Return(func(yield func(any, error) bool) { yield(&User{ID: 2}, nil) })
+
+		// УДАЛЕНО: mockShard.EXPECT().Close() — батчер НЕ закрывает физику
+
+		_ = cb.Push("a", 1)
+		_ = cb.Push("b", 2)
+
+		results := make(map[int]bool)
+		done := make(chan struct{})
+		go func() {
+			for val, err := range cb.All() {
+				if err == nil {
+					results[val.ID] = true
+				}
+			}
+			close(done)
+		}()
+
+		err := cb.Close()
+		assert.NoError(t, err)
+		<-done
+		assert.Len(t, results, 2)
+	})
+
+	t.Run("Close: Propagates", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockCluster := NewMockPgCluster(ctrl)
+		mockShard := NewMockPgInstance(ctrl)
+
+		mockCluster.EXPECT().Size().Return(byte(1)).AnyTimes()
+		mockCluster.EXPECT().GetShard(byte(0)).Return(mockShard, nil).AnyTimes()
+		mockShard.EXPECT().WithMeterProvider(gomock.Any()).Return(mockShard).AnyTimes()
+
+		cb := NewPgClusterBatcher(context.Background(), mockCluster, query)
+
+		// УДАЛЕНО: mockShard.EXPECT().Close()
+
+		err := cb.Close()
+		assert.NoError(t, err)
+	})
+}
