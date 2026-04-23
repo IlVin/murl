@@ -29,7 +29,7 @@ func TestNewConfig(t *testing.T) {
 			"-audit-url", "https://audit.local",
 		}
 
-		// Создаем временные файлы, так как фабрика проверяет их существование (os.OpenFile)
+		// Создаем временные файлы
 		_ = os.WriteFile("/tmp/events.log", []byte(""), 0666)
 		_ = os.WriteFile("/tmp/audit.log", []byte(""), 0666)
 		defer os.Remove("/tmp/events.log")
@@ -42,6 +42,27 @@ func TestNewConfig(t *testing.T) {
 		assert.Equal(t, "PgDB", cfg.RepoDrv())
 		assert.Equal(t, "/tmp/audit.log", cfg.AuditFile())
 		assert.Equal(t, "https://audit.local", cfg.AuditURL().String())
+		assert.Equal(t, "/tmp/events.log", cfg.EventStoragePath())
+	})
+
+	t.Run("Empty paths in flags and env", func(t *testing.T) {
+		// Пустые строки в путях не должны вызывать ошибок (ветки if s == "" { return nil })
+		args := []string{"-f", "", "-audit-file", "", "-audit-url", ""}
+		mockEnv := map[string]string{
+			"FILE_STORAGE_PATH": "",
+			"AUDIT_FILE":        "",
+			"AUDIT_URL":         "",
+		}
+		lookup := func(key string) (string, bool) {
+			val, ok := mockEnv[key]
+			return val, ok
+		}
+
+		cfg, err := NewConfig(&args, lookup)
+		require.NoError(t, err)
+		assert.Empty(t, cfg.EventStoragePath())
+		assert.Empty(t, cfg.AuditFile())
+		assert.Nil(t, cfg.AuditURL())
 	})
 
 	t.Run("Env priority over flags", func(t *testing.T) {
@@ -69,6 +90,7 @@ func TestNewConfig(t *testing.T) {
 			name string
 			args []string
 		}{
+			{"bad flag", []string{"-unknown"}},
 			{"bad address", []string{"-a", "wrong-format"}},
 			{"bad url", []string{"-b", "://missing-scheme"}},
 			{"bad audit url", []string{"-audit-url", "::%"}},
@@ -88,8 +110,12 @@ func TestNewConfig(t *testing.T) {
 func TestConfig_GettersSetters(t *testing.T) {
 	cfg := Config{}
 
-	t.Run("Immutability check", func(t *testing.T) {
-		newCfg := cfg.SetVersion("2.0.0").
+	t.Run("Full chain set and get", func(t *testing.T) {
+		u, _ := url.Parse("https://audit.url")
+		contentTypes := map[string]struct{}{"application/xml": {}}
+
+		newCfg := cfg.
+			SetVersion("2.0.0").
 			SetJWTTTL(time.Hour).
 			SetJWTSecretKey("secret").
 			SetMaxBodySize(500).
@@ -97,9 +123,13 @@ func TestConfig_GettersSetters(t *testing.T) {
 			SetShardSize(128).
 			SetRouterType("gin").
 			SetDBConfigPath("/etc/db.json").
-			SetCompressibleContentTypes(map[string]struct{}{"text/plain": {}})
+			SetDBDSN("postgres://...").
+			SetRepoDrv("PgDB").
+			SetEventStoragePath("/tmp/ev").
+			SetAuditFile("/tmp/au").
+			SetAuditURL(u).
+			SetCompressibleContentTypes(contentTypes)
 
-		assert.NotEqual(t, cfg.Version(), newCfg.Version())
 		assert.Equal(t, "2.0.0", newCfg.Version())
 		assert.Equal(t, time.Hour, newCfg.JWTTTL())
 		assert.Equal(t, "secret", newCfg.JWTSecretKey())
@@ -108,16 +138,27 @@ func TestConfig_GettersSetters(t *testing.T) {
 		assert.Equal(t, byte(128), newCfg.ShardSize())
 		assert.Equal(t, "gin", newCfg.RouterType())
 		assert.Equal(t, "/etc/db.json", newCfg.DBConfigPath())
-		assert.Contains(t, newCfg.CompressibleContentTypes(), "text/plain")
+		assert.Equal(t, "postgres://...", newCfg.DBDSN())
+		assert.Equal(t, "PgDB", newCfg.RepoDrv())
+		assert.Equal(t, "/tmp/ev", newCfg.EventStoragePath())
+		assert.Equal(t, "/tmp/au", newCfg.AuditFile())
+		assert.Equal(t, u, newCfg.AuditURL())
+		assert.Equal(t, contentTypes, newCfg.CompressibleContentTypes())
 	})
 
-	t.Run("SetShortBaseURL зануляет User", func(t *testing.T) {
+	t.Run("SetShortBaseURL user stripping", func(t *testing.T) {
 		u, _ := url.Parse("https://host.com")
 		sb := ShortBaseURL{*u}
 		cfg = cfg.SetShortBaseURL(sb)
 
 		assert.Nil(t, cfg.ShortBaseURL().User)
 		assert.Equal(t, "https://host.com", cfg.ShortBaseURL().String())
+	})
+
+	t.Run("SetListenAddr", func(t *testing.T) {
+		sa, _ := NewSocketAddr("localhost:9999")
+		cfg = cfg.SetListenAddr(sa)
+		assert.Equal(t, "localhost:9999", cfg.ListenAddr())
 	})
 }
 
@@ -148,15 +189,14 @@ func TestShortBaseURL(t *testing.T) {
 }
 
 func TestEnvValidationErrors(t *testing.T) {
-	// Специальные тесты для ошибочных ENV
 	cases := []struct {
 		envKey string
 		envVal string
 	}{
 		{"SERVER_ADDRESS", "wrong"},
 		{"BASE_URL", "::%"},
-		{"FILE_STORAGE_PATH", "/un/exist/ent"},
-		{"AUDIT_FILE", "/un/exist/ent"},
+		{"FILE_STORAGE_PATH", "/un/exist/ent/path/file"},
+		{"AUDIT_FILE", "/un/exist/ent/path/audit"},
 		{"AUDIT_URL", "::%"},
 	}
 

@@ -1,29 +1,30 @@
+// Package pg содержит реализацию репозиториев для работы с PostgreSQL.
 package pg
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"murl/internal/adapters/pgc"
+	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/repository"
-
-	"github.com/jackc/pgx/v5"
 )
 
+// ClusterSz определяет количество логических шардов в кластере БД.
 const ClusterSz = 64
 
 //go:generate $GOPATH/bin/mockgen                                   -destination=repo_links_pgx_mock_test.go         -package=$GOPACKAGE github.com/jackc/pgx/v5 Tx,Row,BatchResults
 //go:generate $GOPATH/bin/mockgen -source=../../adapters/pgc/pgc.go -destination=repo_links_pg_instance_mock_test.go -package=$GOPACKAGE
 
+// UpSertResult описывает структуру результата выполнения SQL-запроса UpSert.
 type UpSertResult struct {
 	Idx uint64
 	Cf  bool
 }
 
-// Описываем маппинг полей вручную для скорости и типобезопасности
+// sqlUpSert — типизированный SQL запрос, выполняющий вставку новой ссылки
+// или получение ID существующей с использованием CTE.
 var sqlUpSert = pgc.NewQuery(`
 WITH ins AS (
     INSERT INTO murl (url)
@@ -46,6 +47,7 @@ LIMIT 1
 	},
 ).AsRead()
 
+// sqlSet — команда для принудительной вставки или обновления пары ID <-> URL.
 var sqlSet = pgc.NewCommand(`
 	INSERT INTO murl (id, url)
 	VALUES ($1, $2)
@@ -54,11 +56,13 @@ var sqlSet = pgc.NewCommand(`
 `,
 ).AsWrite()
 
+// SelectResult описывает данные, возвращаемые при поиске оригинального URL.
 type SelectResult struct {
 	URL     string
 	Deleted bool
 }
 
+// sqlSelect — запрос на получение оригинальной ссылки и её статуса (удалена или нет).
 var sqlSelect = pgc.NewQuery(`
 	SELECT url, deleted FROM murl
 	WHERE id = $1
@@ -71,97 +75,72 @@ var sqlSelect = pgc.NewQuery(`
 
 var ErrInternalServerError error = errors.New("internal server error")
 
+// PgRepoLinks реализует интерфейс repository.RepoLinks для PostgreSQL.
 type PgRepoLinks struct {
 	inst pgc.PgInstance
 }
 
+// NewPgRepoLinks — конструктор репозитория ссылок для Postgres.
 func NewPgRepoLinks(inst pgc.PgInstance) repository.RepoLinks {
 	return &PgRepoLinks{
 		inst: inst,
 	}
 }
 
-// UpSert записывает originalURL строку в шард БД и возвращает shortPath строку, признак конфликта и ошибку
+// UpSert записывает оригинальный URL в БД. Если такой URL уже есть, возвращает его ID
+// и устанавливает conflictFlag в true.
 func (s *PgRepoLinks) UpSert(ctx context.Context, originalURL string) (string, bool, error) {
-	slog.Info("UpSert",
-		slog.String("originalURL", originalURL),
-	)
 	shardID := model.ShardID(originalURL, ClusterSz)
 	res, err := pgc.FetchRow(ctx, s.inst, sqlUpSert, originalURL)
-	slog.Info("UpSert res",
-		slog.Any("res", res),
-	)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert, err)
+		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlUpSert.Name(), err)
 	}
 	shortPath, err := model.MakeShortPath(shardID, res.Idx)
 	if err != nil {
 		return "", false, fmt.Errorf("make short path fail: %w", err)
 	}
-	slog.Info("UpSert shortPath",
-		slog.Any("shortPath", shortPath),
-	)
 	return shortPath, res.Cf, nil
 }
 
-// Select получить по shortPath строке originalURL строку
+// Select извлекает оригинальный URL по его короткому пути, декодируя ID из пути.
 func (s *PgRepoLinks) Select(ctx context.Context, shortPath string) (string, bool, error) {
 	_, idx, err := model.ParseShortPath(shortPath)
-	slog.Info("SELECT",
-		slog.Any("shortPath", shortPath),
-		slog.Any("idx", idx),
-		slog.Any("err", err),
-	)
 	if err != nil {
 		return "", false, fmt.Errorf("invalid format shortPath: %w", err)
 	}
 
 	res, err := pgc.FetchRow(ctx, s.inst, sqlSelect, idx)
-	slog.Info("SELECT res",
-		slog.Any("res", res),
-		slog.Any("err", err),
-	)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlSelect, err)
+		return "", false, fmt.Errorf("failed to execute query (%s): %w", sqlSelect.Name(), err)
 	}
 	return res.URL, res.Deleted, nil
 }
 
+// Set устанавливает жесткое соответствие ID и URL. Полезно для восстановления данных.
 func (s *PgRepoLinks) Set(ctx context.Context, originalURL string, shortPath string) error {
-	slog.Info("Set",
-		slog.String("originalURL", originalURL),
-		slog.String("shortPath", shortPath),
-	)
 	_, idx, err := model.ParseShortPath(shortPath)
 	if err != nil {
 		return fmt.Errorf("invalid format shortPath: %w", err)
 	}
 
 	if _, err := pgc.Exec(ctx, s.inst, sqlSet, idx); err != nil {
-		return fmt.Errorf("failed to execute query (%s): %w", sqlSet, err)
+		return fmt.Errorf("failed to execute query (%s): %w", sqlSet.Name(), err)
 	}
 
 	return nil
 }
 
-// Записывает строку в указанный шард БД и возвращает строку-идентификатор записи
-type shardBatch struct {
-	batch *pgx.Batch
-	items []event.PayloadBatchItem
-}
-
-func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch) event.PayloadBatch {
-	slog.Info("BatchUpSert",
-		slog.Any("batch", batch),
-	)
+// BatchUpSert выполняет массовую вставку ссылок через PgBatcher,
+// обеспечивая высокую скорость за счет группировки запросов в один сетевой пакет.
+func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch dto.Batch) dto.Batch {
 	// Результат
-	result := event.PayloadBatch{
-		Batch: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
+	result := dto.Batch{
+		Batch: make([]dto.BatchItem, 0, len(batch.Batch)),
 	}
 
-	// Запихиваем в батчер запросы в параллельной горутине
 	batcherUpSert := pgc.NewPgBatcher[int](ctx, s.inst, sqlUpSert)
 
+	// Запихиваем в батчер запросы в параллельной горутине
 	go func() {
 		defer batcherUpSert.Close()
 
@@ -175,20 +154,26 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 	}()
 
 	for res := range batcherUpSert.Results() {
+		err := func() error {
+			if res.Err != nil {
+				return res.Err
+			}
+			sID := model.ShardID(batch.Batch[res.Ctx].OriginalURL, ClusterSz)
+			sPath, err := model.MakeShortPath(sID, res.Data.Idx)
+			if err != nil {
+				return err
+			}
+			result.Batch = append(result.Batch, dto.BatchItem{
+				CorrelationID: batch.Batch[res.Ctx].CorrelationID,
+				OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
+				Err:           "",
+				ShortURL:      sPath,
+			})
+			return nil
+		}()
 		// Обрабатываем ошибку конкретной записи
-		if res.Err != nil {
-			result.Batch = append(result.Batch, event.PayloadBatchItem{
-				CorrelationID: batch.Batch[res.Ctx].CorrelationID,
-				OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
-				Err:           ErrInternalServerError.Error(),
-				ShortURL:      "",
-			})
-			continue
-		}
-		sID := model.ShardID(batch.Batch[res.Ctx].OriginalURL, ClusterSz)
-		sPath, err := model.MakeShortPath(sID, res.Data.Idx)
 		if err != nil {
-			result.Batch = append(result.Batch, event.PayloadBatchItem{
+			result.Batch = append(result.Batch, dto.BatchItem{
 				CorrelationID: batch.Batch[res.Ctx].CorrelationID,
 				OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
 				Err:           ErrInternalServerError.Error(),
@@ -196,24 +181,16 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch)
 			})
 			continue
 		}
-		result.Batch = append(result.Batch, event.PayloadBatchItem{
-			CorrelationID: batch.Batch[res.Ctx].CorrelationID,
-			OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
-			Err:           "",
-			ShortURL:      sPath,
-		})
 	}
-	slog.Info("batch result",
-		slog.Any("result", result),
-	)
 
 	return result
 }
 
-func (s *PgRepoLinks) BatchSet(ctx context.Context, batch event.PayloadBatch) event.PayloadBatch {
+// BatchSet выполняет пакетную установку соответствий URL-идентификаторов.
+func (s *PgRepoLinks) BatchSet(ctx context.Context, batch dto.Batch) dto.Batch {
 	// Результат
-	result := event.PayloadBatch{
-		Batch: make([]event.PayloadBatchItem, 0, len(batch.Batch)),
+	result := dto.Batch{
+		Batch: make([]dto.BatchItem, 0, len(batch.Batch)),
 	}
 
 	// Запихиваем в батчер запросы в параллельной горутине
@@ -239,7 +216,7 @@ func (s *PgRepoLinks) BatchSet(ctx context.Context, batch event.PayloadBatch) ev
 	for res := range batcherSet.Results() {
 		// Обрабатываем ошибку конкретной записи
 		if res.Err != nil {
-			result.Batch = append(result.Batch, event.PayloadBatchItem{
+			result.Batch = append(result.Batch, dto.BatchItem{
 				CorrelationID: batch.Batch[res.Ctx].CorrelationID,
 				OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
 				Err:           ErrInternalServerError.Error(),
@@ -247,7 +224,7 @@ func (s *PgRepoLinks) BatchSet(ctx context.Context, batch event.PayloadBatch) ev
 			})
 			continue
 		}
-		result.Batch = append(result.Batch, event.PayloadBatchItem{
+		result.Batch = append(result.Batch, dto.BatchItem{
 			CorrelationID: batch.Batch[res.Ctx].CorrelationID,
 			OriginalURL:   batch.Batch[res.Ctx].OriginalURL,
 			Err:           "",

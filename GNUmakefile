@@ -27,7 +27,7 @@ docker-run:
 ## Run: Быстрый запуск приложения
 run:
 	@echo "Starting application..."
-	go run $(MAIN_PATH)
+	go run $(MAIN_PATH) -d postgres://murl:murl_pswd@localhost:5530/murl_00
 
 ## Test: Запуск всех тестов с проверкой на Race Condition
 test:

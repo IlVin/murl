@@ -15,10 +15,12 @@ import (
 	"github.com/andybalholm/brotli"
 )
 
+// CompressConfig определяет интерфейс конфигурации для модуля сжатия.
 type CompressConfig interface {
 	CompressibleContentTypes() map[string]struct{}
 }
 
+// Codec инкапсулирует механизмы сжатия данных.
 type Codec struct {
 	Name string
 	io.Writer
@@ -26,6 +28,7 @@ type Codec struct {
 	q float64
 }
 
+// NewNonCompressionCodec создает кодек "identity", который пробрасывает данные без изменений.
 func NewNonCompressionCodec(w http.ResponseWriter) Codec {
 	return Codec{
 		Name:   "identity",
@@ -92,6 +95,8 @@ func (cw *CompressResponseWriter) getCodec() Codec {
 	return NewNonCompressionCodec(cw.w)
 }
 
+// CompressResponseWriter оборачивает http.ResponseWriter для автоматического сжатия
+// тела ответа в зависимости от заголовков клиента и типа контента.
 type CompressResponseWriter struct {
 	w                        http.ResponseWriter
 	r                        *http.Request
@@ -101,6 +106,7 @@ type CompressResponseWriter struct {
 	pools                    map[string]*sync.Pool
 }
 
+// NewCompressResponseWriter — конструктор для CompressResponseWriter.
 func NewCompressResponseWriter(w http.ResponseWriter, r *http.Request, compressibleContentTypes map[string]struct{}, pools map[string]*sync.Pool) *CompressResponseWriter {
 	return &CompressResponseWriter{
 		w:                        w,
@@ -111,11 +117,12 @@ func NewCompressResponseWriter(w http.ResponseWriter, r *http.Request, compressi
 	}
 }
 
+// Header возвращает заголовки базового ResponseWriter.
 func (cw *CompressResponseWriter) Header() http.Header {
 	return cw.w.Header()
 }
 
-// Metrics - указатель на структуру метрик. По умолчанию nil
+// Metrics извлекает объект Metrics из контекста запроса для записи статистики сжатия.
 func (cw *CompressResponseWriter) Metrics() *Metrics {
 	m, ok := cw.r.Context().Value(ctxMetricsKey).(*Metrics)
 	if !ok {
@@ -124,6 +131,8 @@ func (cw *CompressResponseWriter) Metrics() *Metrics {
 	return m
 }
 
+// WriteHeader выполняет согласование кодека (Content Negotiation) и записывает HTTP-статус.
+// Сжатие активируется только если Content-Type ответа входит в список разрешенных.
 func (cw *CompressResponseWriter) WriteHeader(statusCode int) {
 	if cw.headerWritten {
 		return
@@ -159,6 +168,7 @@ func (cw *CompressResponseWriter) WriteHeader(statusCode int) {
 
 }
 
+// Close завершает процесс сжатия (сбрасывает буферы) и возвращает ресурсы в пулы.
 func (cw *CompressResponseWriter) Close() (err error) {
 	if cw.codec.Closer == nil {
 		return nil
@@ -187,6 +197,8 @@ func (cw *CompressResponseWriter) Close() (err error) {
 	return err
 }
 
+// Write записывает данные через выбранный кодек.
+// Если Header еще не был отправлен, вызывает WriteHeader с кодом 200 OK.
 func (cw *CompressResponseWriter) Write(p []byte) (int, error) {
 	if !cw.headerWritten {
 		cw.WriteHeader(http.StatusOK)
@@ -210,6 +222,14 @@ func (w *readCloserWrapper) Close() error {
 	return w.closer()
 }
 
+// WithCompress возвращает Middleware для автоматической работы со сжатым трафиком.
+//
+// Возможности:
+// 1. Декомпрессия входящих запросов (Request Body) при наличии Content-Encoding.
+// 2. Сжатие ответов (Response Body) на основе заголовка Accept-Encoding клиента.
+// 3. Использование sync.Pool для Brotli, Gzip и Deflate (существенно снижает аллокации).
+// 4. Учет весов приоритетов (;q=0.8) при выборе алгоритма сжатия.
+// 5. Интеграция с Middleware логирования через передачу метрик в контексте.
 func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 	compressibleContentTypes := cfg.CompressibleContentTypes()
 

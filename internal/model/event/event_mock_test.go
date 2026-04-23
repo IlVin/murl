@@ -10,6 +10,7 @@
 package event
 
 import (
+	dto "murl/internal/dto"
 	reflect "reflect"
 
 	uuid "github.com/google/uuid"
@@ -69,10 +70,10 @@ func (mr *MockEventMockRecorder) GetParents() *gomock.Call {
 }
 
 // GetType mocks base method.
-func (m *MockEvent) GetType() EvType {
+func (m *MockEvent) GetType() dto.EvType {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetType")
-	ret0, _ := ret[0].(EvType)
+	ret0, _ := ret[0].(dto.EvType)
 	return ret0
 }
 

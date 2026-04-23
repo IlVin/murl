@@ -1,6 +1,7 @@
 package event
 
 import (
+	"murl/internal/dto"
 	"testing"
 
 	uuid "github.com/google/uuid"
@@ -11,7 +12,7 @@ import (
 
 func TestMakeAndGetPayload(t *testing.T) {
 	// Данные для теста
-	payload := PayloadAddURL{
+	payload := dto.AddURL{
 		OriginalURL: "https://google.com",
 		ShortURL:    "http://short/1",
 	}
@@ -20,10 +21,10 @@ func TestMakeAndGetPayload(t *testing.T) {
 	ev, err := MakeEvent(payload, nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, ev.GetID())
-	assert.Equal(t, EvAddURL, ev.GetType())
+	assert.Equal(t, dto.EvAddURL, ev.GetType())
 
 	// 2. Тестируем извлечение Payload (Generic)
-	extracted, err := GetPayload[PayloadAddURL](ev)
+	extracted, err := GetPayload[dto.AddURL](ev)
 	require.NoError(t, err)
 	assert.Equal(t, payload.OriginalURL, extracted.OriginalURL)
 }
@@ -39,7 +40,7 @@ func TestEventChain(t *testing.T) {
 	mockParent.EXPECT().GetParents().Return([]uuid.UUID{}).AnyTimes()
 
 	// Создаем дочернее событие через MakeEvent
-	payload := PayloadGetURL{ShortURL: "short"}
+	payload := dto.GetURL{ShortURL: "short"}
 	childEv, err := MakeEvent(payload, mockParent)
 
 	require.NoError(t, err)
@@ -47,9 +48,9 @@ func TestEventChain(t *testing.T) {
 }
 
 func TestSerialization(t *testing.T) {
-	payload := PayloadAddURLBySessionID{
-		OriginalURL: "https://yandex.ru",
-		SessionID:   uuid.New(),
+	payload := dto.AddURLBySessionID{
+		AddURL:    dto.AddURL{OriginalURL: "https://yandex.ru"},
+		SessionID: uuid.New(),
 	}
 
 	ev, _ := MakeEvent(payload, nil)
@@ -68,11 +69,11 @@ func TestSerialization(t *testing.T) {
 }
 
 func TestTypeMismatch(t *testing.T) {
-	payload := PayloadAddURL{OriginalURL: "url"}
+	payload := dto.AddURL{OriginalURL: "url"}
 	ev, _ := MakeEvent(payload, nil)
 
 	// Пытаемся достать неправильный тип payload
-	_, err := GetPayload[PayloadBatch](ev)
+	_, err := GetPayload[dto.Batch](ev)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "type mismatch")
 }

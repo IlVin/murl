@@ -1,3 +1,5 @@
+// Package jwtmanager реализует механизмы создания и валидации JSON Web Tokens (JWT).
+// Обеспечивает аутентификацию пользователей через SessionID и управление временем жизни сессий.
 package jwtmanager
 
 import (
@@ -12,22 +14,28 @@ import (
 
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=jwtmanager_mock_test.go -package=$GOPACKAGE
 
+// JWTManagerConfig определяет интерфейс необходимых настроек для работы с токенами.
+// Реализуется структурой конфигурации приложения.
 type JWTManagerConfig interface {
 	JWTSecretKey() string
 	JWTTTL() time.Duration
 }
 
+// jwtManager инкапсулирует логику работы с JWT, используя алгоритм HS256.
 type jwtManager struct {
 	secretKey  []byte
 	defaultTTL time.Duration
 }
 
+// Claims представляет полезную нагрузку (payload) токена.
+// Содержит стандартные поля JWT и уникальный идентификатор сессии.
 type Claims struct {
 	jwt.RegisteredClaims
 	SessionID uuid.UUID `json:"session_id"`
 }
 
-// NewJWT конструктор менеджера токенов
+// NewJWT — конструктор менеджера токенов.
+// Возвращает ошибку, если в конфигурации отсутствует секретный ключ.
 func NewJWT(cfg JWTManagerConfig) (*jwtManager, error) {
 	key := cfg.JWTSecretKey()
 	if key == "" {
@@ -40,8 +48,9 @@ func NewJWT(cfg JWTManagerConfig) (*jwtManager, error) {
 	}, nil
 }
 
-// NeedRemaining проверяет, нужно ли продлевать сессию.
-// Возвращает true, если до истечения осталось меньше 1/4 от стандартного TTL.
+// NeedRemaining проверяет необходимость обновления (продления) токена.
+// Возвращает true, если срок действия сессии истек или до его окончания осталось
+// менее 25% от установленного в системе времени жизни (TTL).
 func (m *jwtManager) NeedRemaining(session model.Session) bool {
 	if session.TTL.IsZero() {
 		return true
@@ -50,7 +59,9 @@ func (m *jwtManager) NeedRemaining(session model.Session) bool {
 	return time.Until(session.TTL) < m.defaultTTL/4
 }
 
-// GenerateJWT создает новый токен и обновляет TTL в объекте сессии
+// GenerateJWT создает подписанную строковую версию JWT токена на основе данных сессии.
+// При вызове метод автоматически продлевает время жизни сессии (session.TTL)
+// на значение defaultTTL от текущего момента.
 func (m *jwtManager) GenerateJWT(session model.Session) (string, error) {
 	// При генерации всегда продлеваем TTL на стандартную величину
 	session.TTL = time.Now().Add(m.defaultTTL)
@@ -67,7 +78,8 @@ func (m *jwtManager) GenerateJWT(session model.Session) (string, error) {
 	return token.SignedString(m.secretKey)
 }
 
-// VerifyJWT парсит токен и возвращает модель сессии с временем истечения
+// VerifyJWT проверяет подлинность токена и извлекает из него данные сессии.
+// Выполняет проверку алгоритма подписи и срока действия токена.
 func (m *jwtManager) VerifyJWT(tokenString string) (model.Session, error) {
 	claims := &Claims{}
 

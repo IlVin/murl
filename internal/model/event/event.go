@@ -1,153 +1,54 @@
+// Package event реализует систему типизированных событий для Event Sourcing и аудита.
+// Позволяет упаковывать DTO в универсальный конверт с поддержкой прослеживаемости (parent ID).
 package event
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"murl/internal/dto"
 
 	uuid "github.com/google/uuid"
 )
 
-type EvType int32
-
-// !!! [3] НЕ ЗАБУДЬ ПЕРЕГЕНЕРИРОВАТЬ !!!
-//go:generate $GOPATH/bin/stringer -type=EvType
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=event_mock_test.go -package=$GOPACKAGE
 
-// !!! [1] СЮДА ДОПИШИ НОВЫЙ ТИП КОНСТАНТЫ !!!
-// Возможные типы Event.
-const (
-	EvUnknown EvType = iota
-	EvAddURL
-	EvAddURLBySessionID
-	EvGetURL
-	EvGetURLBySessionID
-	EvDeleteURLBySessionID
-	EvBatch
-	EvBatchBySessionID
-	// Добавляем сюда новый тип
-	// и создаем к нему соответствующий тип Payload
-)
-
-// Интерфейс события
+// Event описывает интерфейс конверта события.
+// Конверт содержит метаданные (ID, тип, связи) и саму полезную нагрузку (payload).
 type Event interface {
+	// GetID возвращает уникальный идентификатор конкретного экземпляра события.
 	GetID() uuid.UUID
-	GetType() EvType
+	// GetType возвращает тип события из справочника dto.EvType.
+	GetType() dto.EvType
+	// GetParents возвращает список ID всех предшествующих событий в цепочке.
 	GetParents() []uuid.UUID
+	// Serialize преобразует событие вместе с метаданными в JSON-байт-массив.
 	Serialize() ([]byte, error)
+	// RawPayload возвращает сырые данные полезной нагрузки (JSON).
 	RawPayload() []byte
 }
 
-// ============  Типы Payload  ============
+// Payload определяет ограничение (constraint) для типов, которые могут быть упакованы в событие.
+// Сюда должны входить все DTO, реализующие метод EventType().
 type Payload interface {
-	PayloadAddURL | PayloadAddURLBySessionID |
-		PayloadGetURL | PayloadGetURLBySessionID |
-		PayloadBatch | PayloadBatchBySessionID |
-		PayloadDeleteURLBySessionID
+	dto.AddURL | dto.AddURLBySessionID |
+		dto.GetURL | dto.GetURLBySessionID |
+		dto.Batch | dto.BatchBySessionID |
+		dto.DeleteURLBySessionID
 
-	EventType() EvType
+	EventType() dto.EvType
 }
 
-// !!! [3] СЮДА ДОБАВЬ НОВЫЙ ТИП ПОЛЕЗНОЙ НАГРУЗКИ СОБЫТИЯ !!!
-
-// ------------  EvAddURL  ------------
-type PayloadAddURL struct {
-	OriginalURL  string `json:"original_url"`
-	ShortURL     string `json:"short_url"`
-	ConflictFlag bool   `json:"conflict_flag"`
-}
-
-func (PayloadAddURL) EventType() EvType { return EvAddURL }
-
-//  ------------  /EvAddURL  ------------
-
-// ------------  EvAddURLBySessionID  ------------
-type PayloadAddURLBySessionID struct {
-	OriginalURL  string    `json:"original_url"`
-	ShortURL     string    `json:"short_url"`
-	SessionID    uuid.UUID `json:"session_id"`
-	ConflictFlag bool      `json:"conflict_flag"`
-}
-
-func (PayloadAddURLBySessionID) EventType() EvType { return EvAddURLBySessionID }
-
-//  ------------  /EvAddURLBySessionID  ------------
-
-// ------------  EvGetURL  ------------
-type PayloadGetURL struct {
-	OriginalURL string `json:"original_url"`
-	ShortURL    string `json:"short_url"`
-	IsGone      bool   `json:"is_gone,omitempty"`
-}
-
-func (PayloadGetURL) EventType() EvType { return EvGetURL }
-
-//  ------------  /EvGetURL  ------------
-
-// ------------  EvGetURLBySessionID  ------------
-type PayloadURLItem struct {
-	CorrelationID string `json:"correlation_id,omitempty"`
-	OriginalURL   string `json:"original_url,omitempty"`
-	ShortURL      string `json:"short_url,omitempty"`
-}
-type PayloadGetURLBySessionID struct {
-	SessionID uuid.UUID        `json:"session_id,omitempty"`
-	Result    []PayloadURLItem `json:"result,omitempty"`
-}
-
-func (PayloadGetURLBySessionID) EventType() EvType { return EvGetURLBySessionID }
-
-//  ------------  /EvGetURLBySessionID  ------------
-
-// ------------  EvDeleteURLBySessionID  ------------
-type PayloadDeleteURLBySessionID struct {
-	SessionID uuid.UUID `json:"session_id,omitempty"`
-	ShortURLs []string  `json:"short_urls,omitempty"`
-}
-
-func (PayloadDeleteURLBySessionID) EventType() EvType { return EvDeleteURLBySessionID }
-
-//  ------------  /EvDeleteURLBySessionID  ------------
-
-// ------------  EvBatch  ------------
-type PayloadBatchItem struct {
-	CorrelationID string `json:"correlation_id"`
-	OriginalURL   string `json:"original_url,omitempty"`
-	ShortURL      string `json:"short_url,omitempty"`
-	ConflictFlag  bool   `json:"-"`
-	Err           string `json:"err,omitempty"`
-}
-type PayloadBatch struct {
-	Batch []PayloadBatchItem `json:"batch"`
-}
-
-func (PayloadBatch) EventType() EvType { return EvBatch }
-
-//  ------------  /EvBatch  ------------
-
-// ------------  EvBatchBySessionID  ------------
-type PayloadBatchBySessionID struct {
-	SessionID uuid.UUID          `json:"session_id"`
-	Batch     []PayloadBatchItem `json:"batch"`
-}
-
-func (PayloadBatchBySessionID) EventType() EvType { return EvBatchBySessionID }
-
-//  ------------  /EvBatch  ------------
-
-//  ------------  EvNewType  ------------
-//  Здесь новый тип Event
-//  ------------  /EvNewType  ------------
-
-// ============  Конструкторы (Generics)  ============
-// MakeEvent - Дженерик-конструктор
+// MakeEvent — универсальный конструктор события.
+// Принимает полезную нагрузку и опциональное родительское событие для построения цепочки.
+// Автоматически генерирует новый UUID для события и наследует историю родителей.
 func MakeEvent[T Payload](payload T, parentEvent Event) (Event, error) {
 	pData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("cannot serialize: %w", err)
 	}
 
-	evType := any(payload).(interface{ EventType() EvType }).EventType()
+	evType := any(payload).(interface{ EventType() dto.EvType }).EventType()
 
 	e := &baseEvent{
 		evID:      uuid.New(),
@@ -162,12 +63,13 @@ func MakeEvent[T Payload](payload T, parentEvent Event) (Event, error) {
 	return e, nil
 }
 
-// GetPayload - Дженерик-хелпер для извлечения данных из Event
+// GetPayload — типизированный хелпер для извлечения данных из конверта.
+// Выполняет проверку соответствия типа события целевой структуре.
 func GetPayload[T Payload](e Event) (T, error) {
 	var dest T
 
 	// Аналогично достаем тип для проверки
-	targetType := any(dest).(interface{ EventType() EvType }).EventType()
+	targetType := any(dest).(interface{ EventType() dto.EvType }).EventType()
 
 	if e.GetType() != targetType {
 		return dest, fmt.Errorf("type mismatch: event has %v, target is %v", e.GetType(), targetType)
@@ -180,7 +82,8 @@ func GetPayload[T Payload](e Event) (T, error) {
 	return dest, nil
 }
 
-// Parse - десериализация конверта из []byte
+// Parse выполняет десериализацию байтового потока в объект Event.
+// Используется при чтении событий из внешних хранилищ или очередей.
 func Parse(data []byte) (Event, error) {
 	var env serializeEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -199,26 +102,35 @@ func Parse(data []byte) (Event, error) {
 	}, nil
 }
 
-// ============  Внутренняя реализация  ============
-
+// baseEvent — внутренняя реализация интерфейса Event.
 type baseEvent struct {
 	evParentID []uuid.UUID
 	evID       uuid.UUID
-	evType     EvType
+	evType     dto.EvType
 	evPayload  json.RawMessage
 }
 
-func (e *baseEvent) GetID() uuid.UUID   { return e.evID }
-func (e *baseEvent) GetType() EvType    { return e.evType }
+// GetID возвращает уникальный идентификатор события. Реализует интерфейс Event.
+func (e *baseEvent) GetID() uuid.UUID { return e.evID }
+
+// GetType возвращает константный тип события из пакета dto. Реализует интерфейс Event.
+func (e *baseEvent) GetType() dto.EvType { return e.evType }
+
+// RawPayload возвращает полезную нагрузку события в формате JSON (байты). Реализует интерфейс Event.
 func (e *baseEvent) RawPayload() []byte { return e.evPayload }
+
+// GetParents возвращает срез идентификаторов всех родительских событий.
+// Метод выполняет копирование данных (append в nil), чтобы гарантировать иммутабельность
+// внутреннего состояния события при изменении среза вызывающей стороной.
 func (e *baseEvent) GetParents() []uuid.UUID {
 	return append([]uuid.UUID(nil), e.evParentID...)
 }
 
+// serializeEnvelope — внутренняя структура для обеспечения стабильного формата JSON.
 type serializeEnvelope struct {
 	ParentID []uuid.UUID     `json:"parent_id,omitempty"`
 	ID       uuid.UUID       `json:"id"`
-	Type     EvType          `json:"type"`
+	Type     dto.EvType      `json:"type"`
 	Payload  json.RawMessage `json:"payload"`
 }
 

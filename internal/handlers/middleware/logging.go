@@ -7,34 +7,39 @@ import (
 	"time"
 )
 
+// LoggingConfig определяет интерфейс конфигурации для логирования.
+// На текущий момент интерфейс пуст, но зарезервирован для будущих настроек фильтрации логов.
 type LoggingConfig interface {
 }
 
-// Структура-контейнер для сбора данных
+// Metrics представляет собой контейнер для сбора количественных показателей обработки запроса.
+// Используется для передачи данных между middleware (например, от сжатия к логированию).
 type Metrics struct {
 	IsCompressed bool
 	OriginalSize int64
 	ResponseSize int64
 }
 
-// Делаем враппер для ResponseWriter
+// wrapResponseWriter расширяет стандартный http.ResponseWriter для перехвата
+// статус-кода и подсчета объема переданных байтов.
 type wrapResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
 	metrics    *Metrics
 }
 
+// Metrics возвращает указатель на структуру с метриками текущего запроса.
 func (r *wrapResponseWriter) Metrics() *Metrics {
 	return r.metrics
 }
 
-// Перехват StatusCode
+// Metrics возвращает указатель на структуру с метриками текущего запроса.
 func (r *wrapResponseWriter) WriteHeader(statusCode int) {
 	r.statusCode = statusCode
 	r.ResponseWriter.WriteHeader(statusCode)
 }
 
-// Попсчет размера ответа
+// Write записывает данные в ответ и инкрементирует счетчик ResponseSize в метриках.
 func (r *wrapResponseWriter) Write(data []byte) (int, error) {
 	n, err := r.ResponseWriter.Write(data)
 
@@ -47,10 +52,16 @@ func (r *wrapResponseWriter) Write(data []byte) (int, error) {
 
 type metricsKey struct{}
 
+// ctxMetricsKey — ключ контекста для хранения и извлечения объекта Metrics.
 var ctxMetricsKey = metricsKey{}
 
-// WithLogging добавляет дополнительный код для регистрации сведений о запросе
-// и возвращает новый http.Handler.
+// WithLogging возвращает Middleware для детального логирования HTTP-транзакций.
+//
+// Возможности:
+// 1. Измеряет время обработки запроса (latency).
+// 2. Логирует URI, метод, статус-код и Content-Type ответа.
+// 3. Собирает информацию о размере переданных данных (включая сжатие).
+// 4. Интегрируется со стандартным логгером slog.
 func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

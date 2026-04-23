@@ -19,6 +19,8 @@ import (
 
 const otelNameCqrs = "cqrs"
 
+// cqrsConnector реализует PgInstance с поддержкой разделения на Master/Replica.
+// Обеспечивает автоматическое распределение запросов и логику ретраев на уровне драйвера.
 type cqrsConnector struct {
 	master   PgInstance
 	replicas []PgInstance
@@ -32,6 +34,8 @@ type cqrsConnector struct {
 	mRetries metric.Int64Counter
 }
 
+// NewCQRSConnector создает новый инстанс прокси-драйвера.
+// Если переданы реплики, запросы, помеченные как ReadOnly, будут распределяться между ними Round-Robin.
 func NewCQRSConnector(master PgInstance, replicas ...PgInstance) PgInstance {
 	m := &cqrsConnector{
 		master:   master,
@@ -51,6 +55,7 @@ func (m *cqrsConnector) initMetrics() {
 		metric.WithDescription("Total number of query retries across all replicas"))
 }
 
+// WithTracerProvider пробрасывает TracerProvider во все вложенные инстансы (Master и Replicas).
 func (m *cqrsConnector) WithTracerProvider(tp trace.TracerProvider) PgInstance {
 	if tp != nil {
 		m.tracer = tp.Tracer(getInstrumentationName(otelNameCqrs))
@@ -62,6 +67,7 @@ func (m *cqrsConnector) WithTracerProvider(tp trace.TracerProvider) PgInstance {
 	return m
 }
 
+// WithMeterProvider пробрасывает MeterProvider во все вложенные инстансы и переинициализирует метрики.
 func (m *cqrsConnector) WithMeterProvider(mp metric.MeterProvider) PgInstance {
 	if mp != nil {
 		m.meter = mp.Meter(getInstrumentationName(otelNameCqrs))
@@ -75,6 +81,7 @@ func (m *cqrsConnector) WithMeterProvider(mp metric.MeterProvider) PgInstance {
 	return m
 }
 
+// WithSlogHandler устанавливает общий обработчик логов для всей связки CQRS.
 func (m *cqrsConnector) WithSlogHandler(h slog.Handler) PgInstance {
 	if h != nil {
 		m.logger = slog.New(h)
@@ -86,7 +93,9 @@ func (m *cqrsConnector) WithSlogHandler(h slog.Handler) PgInstance {
 	return m
 }
 
-// Fetch реализует потоковое чтение с ретраями на разные реплики.
+// Fetch реализует потоковое чтение. Если запрос ReadOnly, при ошибке соединения
+// Fetch автоматически попробует переключиться на другую реплику или Master,
+// при условии, что итерация еще не началась (данные не начали передаваться в yield).
 func (m *cqrsConnector) Fetch(ctx context.Context, q PgQuery, args ...any) iter.Seq2[any, error] {
 	ctx, span := m.tracer.Start(ctx, q.Name(),
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -159,6 +168,7 @@ func (m *cqrsConnector) Fetch(ctx context.Context, q PgQuery, args ...any) iter.
 	}
 }
 
+// FetchRow реализует получение одной строки с поддержкой ретраев на реплики.
 func (m *cqrsConnector) FetchRow(ctx context.Context, q PgQuery, args ...any) (res any, err error) {
 	ctx, span := m.tracer.Start(ctx, q.Name(),
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -198,6 +208,8 @@ func (m *cqrsConnector) FetchRow(ctx context.Context, q PgQuery, args ...any) (r
 	return nil, err
 }
 
+// Exec выполняет команду изменения данных (INSERT/UPDATE/DELETE).
+// Операция всегда направляется на Master-узел. Поддерживает до 2-х попыток при сетевых сбоях.
 func (m *cqrsConnector) Exec(ctx context.Context, q PgQuery, args ...any) (int64, error) {
 	ctx, span := m.tracer.Start(ctx, q.Name(),
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -230,6 +242,9 @@ func (m *cqrsConnector) Exec(ctx context.Context, q PgQuery, args ...any) (int64
 	return 0, nil
 }
 
+// SendBatch выполняет пакет запросов. Если запрос помечен как ReadOnly, пакет может быть
+// распределен на реплики. Реализует "прозрачный" ретрай: если одна нода вернула сетевую ошибку
+// до начала передачи данных, коннектор попробует выполнить весь пакет на другой ноде.
 func (m *cqrsConnector) SendBatch(ctx context.Context, q PgQuery, args [][]any) iter.Seq2[any, error] {
 	// Родительский спан для всей цепочки попыток
 	ctx, span := m.tracer.Start(ctx, q.Name(),
@@ -310,7 +325,8 @@ func (m *cqrsConnector) SendBatch(ctx context.Context, q PgQuery, args [][]any) 
 	}
 }
 
-// pickNext ротирует начальную реплику для балансировки и делает сдвиг при ретрае.
+// pickNext выбирает узел для выполнения запроса.
+// Реализует Round-Robin для реплик с учетом их доступности (IsOnline).
 func (m *cqrsConnector) pickNext(isRO bool, attempt int) PgInstance {
 	n := len(m.replicas)
 
@@ -335,6 +351,7 @@ func (m *cqrsConnector) pickNext(isRO bool, attempt int) PgInstance {
 	return m.master
 }
 
+// recordRetry фиксирует факт ретрая в метриках OpenTelemetry.
 func (m *cqrsConnector) recordRetry(ctx context.Context, name, op string) {
 	m.mRetries.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("db.query.name", name),
@@ -342,10 +359,19 @@ func (m *cqrsConnector) recordRetry(ctx context.Context, name, op string) {
 	))
 }
 
-// Репликация интерфейса PgInstance
-func (m *cqrsConnector) IsOnline() bool                          { return m.master.IsOnline() }
+// IsOnline возвращает признак работоспособности мастер-узла.
+// Если мастер отключен предохранителем (Circuit Breaker), коннектор считается оффлайн.
+func (m *cqrsConnector) IsOnline() bool { return m.master.IsOnline() }
+
+// RunMigrations запускает процесс миграции схемы базы данных.
+// Операция всегда выполняется строго на мастер-узле.
 func (m *cqrsConnector) RunMigrations(ctx context.Context) error { return m.master.RunMigrations(ctx) }
-func (m *cqrsConnector) Ping(ctx context.Context) error          { return m.master.Ping(ctx) }
+
+// Ping проверяет физическую доступность мастер-узла.
+func (m *cqrsConnector) Ping(ctx context.Context) error { return m.master.Ping(ctx) }
+
+// Close выполняет каскадное закрытие всех соединений: сначала мастера,
+// затем всех подключенных реплик. Возвращает ошибку, если мастер закрылся со сбоем.
 func (m *cqrsConnector) Close(ctx context.Context) error {
 	err := m.master.Close(ctx)
 	for _, r := range m.replicas {
@@ -353,6 +379,9 @@ func (m *cqrsConnector) Close(ctx context.Context) error {
 	}
 	return err
 }
+
+// String реализует интерфейс fmt.Stringer, возвращая информацию
+// о хосте мастера и количестве доступных реплик.
 func (m *cqrsConnector) String() string {
 	return fmt.Sprintf("<CQRSConnector>{Master:%s, Replicas:%d}", m.master.String(), len(m.replicas))
 }

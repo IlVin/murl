@@ -2,107 +2,78 @@ package service
 
 import (
 	"context"
-	"net/url"
 	"testing"
 
+	"murl/internal/config"
+	"murl/internal/dto"
+	"murl/internal/model"
+
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-
-	"murl/internal/config" // Предполагаем, что моки Repo и Notifier лежат здесь
-	"murl/internal/model/event"
 )
 
-type mockSvcConfig struct {
-	keySession config.KeySession
-	baseURL    string
-}
-
-func (m *mockSvcConfig) ShortBaseURL() config.ShortBaseURL {
-	u, _ := url.Parse(m.baseURL)
-	return config.ShortBaseURL{URL: *u}
-}
-
-func (m *mockSvcConfig) KeySession() config.KeySession {
-	return m.keySession
-}
-
-func TestService_AddURL_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockRepo := NewMockRepo(ctrl)
-	mockNotifier := NewMockAuditlogNotifier(ctrl) // Нужен мок нотификатора
-
-	cfg := &mockSvcConfig{baseURL: "http://short.io"}
-	// В конструкторе теперь 4 параметра
-	svc := NewService(context.Background(), cfg, mockRepo, mockNotifier)
-
-	ctx := context.Background()
-	original := "https://google.com"
-
-	// 1. Ожидаем запись в репозиторий
-	mockRepo.EXPECT().On(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, e event.Event) (event.Event, error) {
-			p, _ := event.GetPayload[event.PayloadAddURL](e)
-			p.ShortURL = "/.AAQ"
-			return event.MakeEvent(p, e)
-		})
-
-	// 2. Ожидаем отправку нотификации (обязательно, иначе будет паника)
-	mockNotifier.EXPECT().Notify(gomock.Any(), gomock.Any()).Return(nil)
-
-	res, err := svc.AddURL(ctx, original)
-
-	require.NoError(t, err)
-	assert.Equal(t, "http://short.io/.AAQ", res)
-}
-
-func TestService_GetURL_Success(t *testing.T) {
+func TestService_AddURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockRepo := NewMockRepo(ctrl)
 	mockNotifier := NewMockAuditlogNotifier(ctrl)
+	mockCfg := NewMockServiceConfig(ctrl)
 
-	cfg := &mockSvcConfig{baseURL: "http://short.io"}
-	svc := NewService(context.Background(), cfg, mockRepo, mockNotifier)
+	u, _ := config.NewShortBaseURL("http://localhost:8080")
 
-	shortPath := "/.AAQ"
-	original := "https://github.com"
+	// ВАЖНО: Настраиваем конфиг ДО создания сервиса,
+	// так как NewService вызывает методы конфига внутри себя.
+	mockCfg.EXPECT().ShortBaseURL().Return(u).AnyTimes()
+	mockCfg.EXPECT().KeySession().Return(config.KeySession("session")).AnyTimes()
 
-	mockRepo.EXPECT().On(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, e event.Event) (event.Event, error) {
-			p := event.PayloadGetURL{OriginalURL: original}
-			return event.MakeEvent(p, e)
-		})
+	svc := NewService(context.Background(), mockCfg, mockRepo, mockNotifier)
 
-	// Ожидаем нотификацию типа "follow"
-	mockNotifier.EXPECT().Notify(gomock.Any(), gomock.Any()).Return(nil)
+	t.Run("Success anonymous", func(t *testing.T) {
+		ctx := context.Background()
+		original := "https://google.com"
+		shortPath := "/.ABC"
 
-	res, err := svc.GetURL(context.Background(), shortPath)
-	assert.NoError(t, err)
-	assert.Equal(t, original, res)
+		mockRepo.EXPECT().
+			AddURL(ctx, gomock.Any()).
+			Return(dto.AddURL{ShortURL: shortPath, ConflictFlag: false}, nil)
+
+		mockNotifier.EXPECT().
+			Notify(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		res, err := svc.AddURL(ctx, original)
+		require.NoError(t, err)
+		assert.Equal(t, "http://localhost:8080/.ABC", res)
+	})
+
+	t.Run("Recursive shortening blocked", func(t *testing.T) {
+		res, err := svc.AddURL(context.Background(), "http://localhost:8080/some-path")
+		assert.ErrorIs(t, err, ErrDomainIsBlocked)
+		assert.Empty(t, res)
+	})
 }
 
-func TestService_NormalizeURL_Validation(t *testing.T) {
+func TestService_NormalizeURL(t *testing.T) {
 	svc := &Service{}
 	ctx := context.Background()
 
 	tests := []struct {
 		name    string
-		input   string
+		url     string
 		wantErr error
 	}{
-		{"Valid HTTPS", "https://ya.ru", nil},
-		{"Valid HTTP", "http://ya.ru", nil},
-		{"No Scheme", "ya.ru", ErrInvalidURLFormat},
-		{"FTP Scheme", "ftp://ya.ru", ErrInvalidURLFormat},
+		{"Valid HTTPS", "https://yandex.ru", nil},
+		{"Valid HTTP", "http://murl.io", nil},
+		{"No scheme", "yandex.ru", ErrInvalidURLFormat},
+		{"Unsupported scheme", "ftp://files.com", ErrInvalidURLFormat},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.NormalizeURL(ctx, tt.input)
+			_, err := svc.NormalizeURL(ctx, tt.url)
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
 			} else {
@@ -112,45 +83,60 @@ func TestService_NormalizeURL_Validation(t *testing.T) {
 	}
 }
 
-func TestService_AddURL_BlockedDomain(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockNotifier := NewMockAuditlogNotifier(ctrl)
-	cfg := &mockSvcConfig{baseURL: "http://murl.io"}
-	svc := NewService(context.Background(), cfg, nil, mockNotifier)
-
-	_, err := svc.AddURL(context.Background(), "http://murl.io")
-	assert.ErrorIs(t, err, ErrDomainIsBlocked)
-}
-
-func TestService_Batch_Success(t *testing.T) {
+func TestService_GetURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockRepo := NewMockRepo(ctrl)
-	// Добавляем слеш в конце baseURL для чистоты,
-	// хотя url.Parse и JoinPath обычно справляются сами
-	cfg := &mockSvcConfig{baseURL: "http://s.io"}
-	svc := NewService(context.Background(), cfg, mockRepo, nil)
+	mockNotifier := NewMockAuditlogNotifier(ctrl)
+	svc := &Service{repo: mockRepo, aNotifier: mockNotifier}
+	ctx := context.Background()
 
-	batch := event.PayloadBatch{
-		Batch: []event.PayloadBatchItem{
-			{OriginalURL: "https://ok.com"},
-		},
-	}
+	t.Run("Success redirect", func(t *testing.T) {
+		short := "/.OK"
+		original := "https://target.com"
 
-	mockRepo.EXPECT().On(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, e event.Event) (event.Event, error) {
-			p, _ := event.GetPayload[event.PayloadBatch](e)
-			// Устанавливаем ShortURL для первого элемента пакета
-			p.Batch[0].ShortURL = "short"
-			return event.MakeEvent(p, e)
-		})
+		mockRepo.EXPECT().
+			GetURL(ctx, dto.GetURL{ShortURL: short}).
+			Return(dto.GetURL{OriginalURL: original, IsGone: false}, nil)
 
-	res, err := svc.Batch(context.Background(), batch)
+		mockNotifier.EXPECT().Notify(gomock.Any(), gomock.Any()).Return(nil)
 
-	require.NoError(t, err)
-	// Исправлено: ожидаем полный URL, который генерирует сервис
-	assert.Equal(t, "http://s.io/short", res.Batch[0].ShortURL)
+		res, err := svc.GetURL(ctx, short)
+		assert.NoError(t, err)
+		assert.Equal(t, original, res)
+	})
+
+	t.Run("URL is Gone", func(t *testing.T) {
+		mockRepo.EXPECT().
+			GetURL(ctx, gomock.Any()).
+			Return(dto.GetURL{IsGone: true, OriginalURL: "old-url"}, nil)
+
+		res, err := svc.GetURL(ctx, "/.GONE")
+		assert.ErrorIs(t, err, ErrGone)
+		assert.Equal(t, "old-url", res)
+	})
+}
+
+func TestService_DeleteURLBySessionID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := NewMockRepo(ctrl)
+	svc := &Service{repo: mockRepo}
+
+	session := model.Session{ID: uuid.New()}
+	urls := []string{"abc"}
+
+	// Вместо MatchedBy используем более простой способ проверки аргументов
+	mockRepo.EXPECT().
+		DeleteURLBySessionID(gomock.Any(), gomock.Any()).
+		Do(func(ctx context.Context, d dto.DeleteURLBySessionID) {
+			assert.Equal(t, session.ID, d.SessionID)
+			assert.Equal(t, "/abc", d.ShortURLs[0])
+		}).
+		Return(nil)
+
+	err := svc.DeleteURLBySessionID(context.Background(), session, urls)
+	assert.NoError(t, err)
 }

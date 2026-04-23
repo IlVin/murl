@@ -11,6 +11,7 @@ package repository
 
 import (
 	context "context"
+	dto "murl/internal/dto"
 	event "murl/internal/model/event"
 	reflect "reflect"
 
@@ -121,45 +122,133 @@ func (m *MockRepo) EXPECT() *MockRepoMockRecorder {
 	return m.recorder
 }
 
-// Close mocks base method.
-func (m *MockRepo) Close(ctx context.Context) error {
+// AddURL mocks base method.
+func (m *MockRepo) AddURL(arg0 context.Context, arg1 dto.AddURL) (dto.AddURL, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Close", ctx)
+	ret := m.ctrl.Call(m, "AddURL", arg0, arg1)
+	ret0, _ := ret[0].(dto.AddURL)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AddURL indicates an expected call of AddURL.
+func (mr *MockRepoMockRecorder) AddURL(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddURL", reflect.TypeOf((*MockRepo)(nil).AddURL), arg0, arg1)
+}
+
+// AddURLBySessionID mocks base method.
+func (m *MockRepo) AddURLBySessionID(arg0 context.Context, arg1 dto.AddURLBySessionID) (dto.AddURLBySessionID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddURLBySessionID", arg0, arg1)
+	ret0, _ := ret[0].(dto.AddURLBySessionID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AddURLBySessionID indicates an expected call of AddURLBySessionID.
+func (mr *MockRepoMockRecorder) AddURLBySessionID(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddURLBySessionID", reflect.TypeOf((*MockRepo)(nil).AddURLBySessionID), arg0, arg1)
+}
+
+// Batch mocks base method.
+func (m *MockRepo) Batch(arg0 context.Context, arg1 dto.Batch) (dto.Batch, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Batch", arg0, arg1)
+	ret0, _ := ret[0].(dto.Batch)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Batch indicates an expected call of Batch.
+func (mr *MockRepoMockRecorder) Batch(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Batch", reflect.TypeOf((*MockRepo)(nil).Batch), arg0, arg1)
+}
+
+// Close mocks base method.
+func (m *MockRepo) Close(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Close", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Close indicates an expected call of Close.
-func (mr *MockRepoMockRecorder) Close(ctx any) *gomock.Call {
+func (mr *MockRepoMockRecorder) Close(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRepo)(nil).Close), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockRepo)(nil).Close), arg0)
 }
 
-// On mocks base method.
-func (m *MockRepo) On(ctx context.Context, e event.Event) (event.Event, error) {
+// DeleteURLBySessionID mocks base method.
+func (m *MockRepo) DeleteURLBySessionID(arg0 context.Context, arg1 dto.DeleteURLBySessionID) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "On", ctx, e)
-	ret0, _ := ret[0].(event.Event)
+	ret := m.ctrl.Call(m, "DeleteURLBySessionID", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteURLBySessionID indicates an expected call of DeleteURLBySessionID.
+func (mr *MockRepoMockRecorder) DeleteURLBySessionID(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteURLBySessionID", reflect.TypeOf((*MockRepo)(nil).DeleteURLBySessionID), arg0, arg1)
+}
+
+// GetURL mocks base method.
+func (m *MockRepo) GetURL(arg0 context.Context, arg1 dto.GetURL) (dto.GetURL, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetURL", arg0, arg1)
+	ret0, _ := ret[0].(dto.GetURL)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// On indicates an expected call of On.
-func (mr *MockRepoMockRecorder) On(ctx, e any) *gomock.Call {
+// GetURL indicates an expected call of GetURL.
+func (mr *MockRepoMockRecorder) GetURL(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "On", reflect.TypeOf((*MockRepo)(nil).On), ctx, e)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURL", reflect.TypeOf((*MockRepo)(nil).GetURL), arg0, arg1)
+}
+
+// GetURLBySessionID mocks base method.
+func (m *MockRepo) GetURLBySessionID(arg0 context.Context, arg1 dto.GetURLBySessionID) (dto.GetURLBySessionID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetURLBySessionID", arg0, arg1)
+	ret0, _ := ret[0].(dto.GetURLBySessionID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetURLBySessionID indicates an expected call of GetURLBySessionID.
+func (mr *MockRepoMockRecorder) GetURLBySessionID(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURLBySessionID", reflect.TypeOf((*MockRepo)(nil).GetURLBySessionID), arg0, arg1)
+}
+
+// On mocks base method.
+func (m *MockRepo) On(arg0 context.Context, arg1 event.Event) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "On", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// On indicates an expected call of On.
+func (mr *MockRepoMockRecorder) On(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "On", reflect.TypeOf((*MockRepo)(nil).On), arg0, arg1)
 }
 
 // Ping mocks base method.
-func (m *MockRepo) Ping(ctx context.Context) error {
+func (m *MockRepo) Ping(arg0 context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Ping", ctx)
+	ret := m.ctrl.Call(m, "Ping", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Ping indicates an expected call of Ping.
-func (mr *MockRepoMockRecorder) Ping(ctx any) *gomock.Call {
+func (mr *MockRepoMockRecorder) Ping(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockRepo)(nil).Ping), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockRepo)(nil).Ping), arg0)
 }

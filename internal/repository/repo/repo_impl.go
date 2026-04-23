@@ -1,3 +1,6 @@
+// Package repo предоставляет конкретную реализацию интерфейса repository.Repo.
+// Модуль отвечает за инициализацию выбранного драйвера хранилища, управление
+// журналом WAL и оркестрацию запросов между специализированными репозиториями.
 package repo
 
 import (
@@ -6,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"murl/internal/adapters/pgc"
+	"murl/internal/dto"
 	"murl/internal/model/event"
 	"murl/internal/repository"
 	"murl/internal/repository/inmem"
@@ -18,10 +22,13 @@ import (
 //go:generate $GOPATH/bin/mockgen -source=../repo_links.go          -destination=repo_impl_repo_links_mock_test.go   -package=$GOPACKAGE
 
 const (
+	// RepoInMemory — идентификатор драйвера для работы в оперативной памяти.
 	RepoInMemory string = "InMemory"
+	// RepoPostgres — идентификатор драйвера для работы с PostgreSQL.
 	RepoPostgres string = "PgDB"
 )
 
+// repo — внутренняя структура, объединяющая все компоненты хранилища.
 type repo struct {
 	pgInst               pgc.PgInstance
 	memCore              *inmem.InMemCore
@@ -30,7 +37,9 @@ type repo struct {
 	wal                  wal.WAL
 }
 
-// Конструктор хранилища с драйвером
+// NewRepo — конструктор универсального репозитория.
+// Выполняет инициализацию выбранного драйвера, запускает миграции для БД
+// и производит восстановление состояния (replay) из WAL, если указан путь к файлу событий.
 func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error) {
 
 	// Инициализация бизнес репозиториев
@@ -38,6 +47,7 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 
 	if cfg.RepoDrv() == RepoPostgres {
 		r.pgInst, err = pgc.NewPgConnector(ctx, cfg.DBDSN())
+		r.pgInst.WithSlogHandler(slog.Default().Handler())
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +78,7 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 			return nil, err
 		}
 		for e := range ch {
-			if _, err := r.On(walCtx, e); err != nil {
+			if err := r.On(walCtx, e); err != nil {
 				return r, fmt.Errorf("wal load fail: %w", err)
 			}
 		}
@@ -82,8 +92,11 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 	return r, nil
 }
 
+// Close корректно завершает работу всех компонентов репозитория.
 func (r *repo) Close(ctx context.Context) error {
-	r.wal.Close()
+	if r.wal != nil {
+		r.wal.Close()
+	}
 
 	if r.pgInst == nil {
 		return nil
@@ -92,6 +105,7 @@ func (r *repo) Close(ctx context.Context) error {
 	return r.pgInst.Close(ctx)
 }
 
+// Ping проверяет доступность внешнего хранилища (если используется Postgres).
 func (r *repo) Ping(ctx context.Context) error {
 	if r.pgInst == nil {
 		return nil
@@ -100,183 +114,175 @@ func (r *repo) Ping(ctx context.Context) error {
 	return r.pgInst.Ping(ctx)
 }
 
-func (r *repo) On(ctx context.Context, e event.Event) (event.Event, error) {
-	slog.Info("Event",
-		slog.String("e.Type", e.GetType().String()),
-	)
-	switch e.GetType() {
-	case event.EvAddURL:
-		return r.evAddURL(ctx, e)
-	case event.EvAddURLBySessionID:
-		return r.evAddURLBySessionID(ctx, e)
-	case event.EvDeleteURLBySessionID:
-		return r.evDeleteURLBySessionID(ctx, e)
-	case event.EvGetURL:
-		return r.evGetURL(ctx, e)
-	case event.EvGetURLBySessionID:
-		return r.evGetURLBySessionID(ctx, e)
-	case event.EvBatch:
-		return r.evBatch(ctx, e)
-
-	}
-	return nil, fmt.Errorf("event type '%s' not implemented", e.GetType())
-}
-
-// evAddURL добавляет URL в БД
-func (r *repo) evAddURL(ctx context.Context, e event.Event) (resEvent event.Event, err error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadAddURL](e)
+// pushToWAL Добавляем событие в WAL
+func (r *repo) pushToWAL(e event.Event, err error) (event.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := r.wal.Push(e); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
 
+// On применяет входящее событие к текущему состоянию репозитория.
+// Используется для восстановления данных из WAL при старте приложения.
+func (r *repo) On(ctx context.Context, e event.Event) error {
+	switch e.GetType() {
+	case dto.EvAddURL:
+		p, err := event.GetPayload[dto.AddURL](e)
+		if err != nil {
+			return err
+		}
+		_, err = r.AddURL(ctx, p)
+		if err != nil {
+			return err
+		}
+		return nil
+	case dto.EvAddURLBySessionID:
+		p, err := event.GetPayload[dto.AddURLBySessionID](e)
+		if err != nil {
+			return err
+		}
+		_, err = r.AddURLBySessionID(ctx, p)
+		if err != nil {
+			return err
+		}
+		return nil
+	case dto.EvDeleteURLBySessionID:
+		p, err := event.GetPayload[dto.DeleteURLBySessionID](e)
+		if err != nil {
+			return err
+		}
+		err = r.DeleteURLBySessionID(ctx, p)
+		if err != nil {
+			return err
+		}
+		return nil
+	case dto.EvBatch:
+		p, err := event.GetPayload[dto.Batch](e)
+		if err != nil {
+			return err
+		}
+		_, err = r.Batch(ctx, p)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("event type '%s' not implemented", e.GetType())
+}
+
+// AddURL сохраняет новую ссылку. Если WAL активен и конфликта не возникло,
+// событие добавления логируется на диск.
+func (r *repo) AddURL(ctx context.Context, p dto.AddURL) (dto.AddURL, error) {
 	// Запись в БД маппинга
 	if len(p.ShortURL) > 0 {
 		if err := r.repoLinks.Set(ctx, p.OriginalURL, p.ShortURL); err != nil {
-			return nil, err
+			return p, err
 		}
-		return e, nil
+		return p, nil
 	} else {
 		shortPath, conflictFlag, err := r.repoLinks.UpSert(ctx, p.OriginalURL)
 		if err != nil {
-			return nil, err
+			return p, err
 		}
 
 		// Приведение Path к URL
 		p.ShortURL = shortPath
 		p.ConflictFlag = conflictFlag
-
-		// Добавляем событие в WAL
-		resEvent, err = event.MakeEvent(p, e)
-		if err != nil {
-			return nil, err
-		}
-		if r.wal != nil && !p.ConflictFlag {
-			if err := r.wal.Push(resEvent); err != nil {
-				return nil, err
-			}
+	}
+	if r.wal != nil && !p.ConflictFlag {
+		if _, err := r.pushToWAL(event.MakeEvent(p, nil)); err != nil {
+			return p, err
 		}
 	}
-
-	return resEvent, nil
+	return p, nil
 }
 
-// evAddURL добавляет URL в БД шардируя по SessionID
-func (r *repo) evAddURLBySessionID(ctx context.Context, e event.Event) (resEvent event.Event, err error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadAddURLBySessionID](e)
-	if err != nil {
-		return nil, err
-	}
-
+// AddURLBySessionID сохраняет ссылку с привязкой к сессии пользователя.
+func (r *repo) AddURLBySessionID(ctx context.Context, p dto.AddURLBySessionID) (dto.AddURLBySessionID, error) {
 	// Запись в БД маппинга
 	if len(p.ShortURL) > 0 {
 		if err := r.repoLinksBySessionID.Set(ctx, p.SessionID.String(), p.OriginalURL, p.ShortURL); err != nil {
-			return nil, err
+			return p, err
 		}
-		return e, nil
+		return p, nil
 	} else {
 		shortPath, conflictFlag, err := r.repoLinksBySessionID.UpSert(ctx, p.SessionID.String(), p.OriginalURL)
 		if err != nil {
-			return nil, err
+			return p, err
 		}
 
 		// Приведение Path к URL
 		p.ShortURL = shortPath
 		p.ConflictFlag = conflictFlag
 
-		// Добавляем событие в WAL
-		resEvent, err = event.MakeEvent(p, e)
-		if err != nil {
-			return nil, err
-		}
 		if r.wal != nil && !p.ConflictFlag {
-			if err := r.wal.Push(resEvent); err != nil {
-				return nil, err
+			if _, err := r.pushToWAL(event.MakeEvent(p, nil)); err != nil {
+				return p, err
 			}
 		}
 	}
 
-	return resEvent, nil
+	return p, nil
 }
 
-// evDeleteURL добавляет URL в БД шардируя по SessionID
-func (r *repo) evDeleteURLBySessionID(ctx context.Context, e event.Event) (resEvent event.Event, err error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadDeleteURLBySessionID](e)
-	if err != nil {
-		return nil, err
-	}
-
-	// Отложенное удаление реализовано только для Pg
-	if r.pgInst == nil {
-		return nil, errors.New("DeleteURLBySessionID is not implemented")
-	}
-
-	if err := r.repoLinksBySessionID.BatchDelBySessionID(ctx, p.SessionID.String(), p); err != nil {
-		return nil, err
-	}
-
-	return nil, nil
-}
-
-// evGetURL считывает OriginURL по ShortPath из БД
-func (r *repo) evGetURL(ctx context.Context, e event.Event) (event.Event, error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadGetURL](e)
-	if err != nil {
-		return nil, err
-	}
-
+// GetURL извлекает оригинальный URL по короткому пути.
+func (r *repo) GetURL(ctx context.Context, p dto.GetURL) (dto.GetURL, error) {
 	originalURL, deleted, err := r.repoLinks.Select(ctx, p.ShortURL)
 	if err != nil {
-		return nil, err
+		return p, err
 	}
 
 	p.OriginalURL = originalURL
 	p.IsGone = deleted
 
-	return event.MakeEvent(p, e)
+	return p, nil
 }
 
-// evGetURL считывает OriginURL по ShortPath из БД
-func (r *repo) evGetURLBySessionID(ctx context.Context, e event.Event) (event.Event, error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadGetURLBySessionID](e)
-	if err != nil {
-		return nil, err
-	}
-
+// GetURLBySessionID возвращает список всех ссылок конкретной сессии.
+func (r *repo) GetURLBySessionID(ctx context.Context, p dto.GetURLBySessionID) (dto.GetURLBySessionID, error) {
 	items, err := r.repoLinksBySessionID.SelectAll(ctx, p.SessionID.String())
 	if err != nil {
-		return nil, err
+		return p, err
 	}
 
 	p.Result = items
 
-	return event.MakeEvent(p, e)
+	return p, nil
 }
 
-// evBatch добавляет пакет URL в БД
-func (r *repo) evBatch(ctx context.Context, e event.Event) (event.Event, error) {
-	// Парсинг события и проверка типа события
-	p, err := event.GetPayload[event.PayloadBatch](e)
-	if err != nil {
-		return nil, err
+// DeleteURLBySessionID помечает ссылки пользователя как удаленные.
+// На текущий момент полноценно реализовано только для драйвера Postgres.
+func (r *repo) DeleteURLBySessionID(ctx context.Context, p dto.DeleteURLBySessionID) error {
+	// Отложенное удаление реализовано только для Pg
+	if r.pgInst == nil {
+		return errors.New("DeleteURLBySessionID is not implemented")
 	}
 
-	res := r.repoLinks.BatchUpSert(ctx, p)
-
-	// Добавляем событие в WAL
-	resEvent, err := event.MakeEvent(res, e)
-	if err != nil {
-		return nil, err
+	if err := r.repoLinksBySessionID.BatchDelBySessionID(ctx, p.SessionID.String(), p); err != nil {
+		return err
 	}
+
 	if r.wal != nil {
-		if err := r.wal.Push(resEvent); err != nil {
-			return nil, err
+		if _, err := r.pushToWAL(event.MakeEvent(p, nil)); err != nil {
+			return err
 		}
 	}
 
-	return resEvent, nil
+	return nil
+}
+
+// Batch выполняет пакетную вставку ссылок и логирует операцию в WAL.
+func (r *repo) Batch(ctx context.Context, p dto.Batch) (dto.Batch, error) {
+	res := r.repoLinks.BatchUpSert(ctx, p)
+
+	if r.wal != nil {
+		if _, err := r.pushToWAL(event.MakeEvent(p, nil)); err != nil {
+			return p, err
+		}
+	}
+
+	return res, nil
 }

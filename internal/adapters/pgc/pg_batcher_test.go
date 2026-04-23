@@ -6,143 +6,110 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sony/gobreaker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/metric/noop"
-	traceNoop "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/mock/gomock"
 )
 
-func TestComplexBatcherWithCQRS(t *testing.T) {
+func TestComplexBatcher_RetryLogic(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	mockMaster := NewMockPgInstance(ctrl)
-	mockReplica := NewMockPgInstance(ctrl)
 
-	mockMaster.EXPECT().String().Return("master:5432").AnyTimes()
-	mockMaster.EXPECT().WithTracerProvider(gomock.Any()).Return(mockMaster).AnyTimes()
-	mockMaster.EXPECT().WithMeterProvider(gomock.Any()).Return(mockMaster).AnyTimes()
+	type User struct{ ID int }
+	// Используем конкретный тип в NewQuery для соответствия итератору
+	readQuery := NewQuery("SELECT 1", func(u *User) []any { return []any{&u.ID} }).AsRead()
 
-	mockReplica.EXPECT().String().Return("replica:5432").AnyTimes()
-	mockReplica.EXPECT().IsOnline().Return(true).AnyTimes()
-	mockReplica.EXPECT().WithTracerProvider(gomock.Any()).Return(mockReplica).AnyTimes()
-	mockReplica.EXPECT().WithMeterProvider(gomock.Any()).Return(mockReplica).AnyTimes()
+	batcher := NewPgBatcher[int](ctx, mockMaster, readQuery)
 
-	cqrs := NewCQRSConnector(mockMaster, mockReplica)
-
-	t.Run("Retry Logic: First Node Fails", func(t *testing.T) {
-		readQuery := NewQuery("SELECT 1", func(u *int) []any { return []any{u} }).AsRead()
-		// Имитируем поведение PgClusterBatcher
-		readBatcher := NewPgBatcher(ctx, cqrs, readQuery).WithMeterProvider(noop.NewMeterProvider())
-
+	t.Run("Retry Logic: Network Error then Success", func(t *testing.T) {
 		netErr := mockNetError{error: fmt.Errorf("network timeout")}
 
-		// 1. Ошибка на реплике
-		mockReplica.EXPECT().
-			SendBatch(gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(func(yield func(any, error) bool) {
-				var zero any
-				yield(zero, netErr)
-			})
+		// Настраиваем ожидания мока
+		gomock.InOrder(
+			mockMaster.EXPECT().
+				SendBatch(gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(func(yield func(any, error) bool) {
+					yield(nil, netErr)
+				}),
 
-		// 2. Успех на мастере
-		mockMaster.EXPECT().
-			SendBatch(gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(func(yield func(any, error) bool) {
-				val := 1
-				yield(&val, nil)
-			})
+			mockMaster.EXPECT().
+				SendBatch(gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(func(yield func(any, error) bool) {
+					val := &User{ID: 42}
+					yield(val, nil)
+				}),
+		)
 
-		err := readBatcher.Push(1)
-		require.NoError(t, err)
+		// Канал для сбора финального результата
+		done := make(chan struct{})
+		var finalID int
+		var finalErr error
 
-		results := make(chan int, 1)
+		// Читаем результаты. Цикл завершится, когда batcher закроет Results() внутри Stop/worker
 		go func() {
-			for val, err := range readBatcher.All() {
-				if err == nil {
-					results <- val
+			for res := range batcher.Results() {
+				if res.Err != nil {
+					finalErr = res.Err
+				} else {
+					finalID = res.Data.ID
 				}
 			}
-			close(results)
+			close(done)
 		}()
 
-		err = readBatcher.Flush()
-		assert.NoError(t, err)
+		// Отправляем задачу
+		batcher.Requests() <- BatchEntry[int]{
+			Args: []any{1},
+			Ctx:  100,
+		}
 
-		_ = readBatcher.Close()
-		assert.Equal(t, 1, <-results)
+		// Закрываем батчер. Это инициирует flush, дождется воркера и закроет канал Results.
+		err := batcher.Close()
+		require.NoError(t, err)
+
+		// Ждем завершения чтения результатов
+		select {
+		case <-done:
+			assert.Equal(t, 42, finalID)
+			assert.NoError(t, finalErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("test timed out waiting for batcher results")
+		}
 	})
 }
 
-func TestPgBatcher_With_PgConnector(t *testing.T) {
+func TestPgBatcher_CommandMode(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	ctx := context.Background()
-	mockPool := NewMockPgxPoolIface(ctrl)
-	mockBR := NewMockBatchResults(ctrl)
-	mockRows := NewMockRows(ctrl)
+	mockPg := NewMockPgInstance(ctrl)
 
-	meter := noop.NewMeterProvider().Meter("test")
-	mLatency, _ := meter.Float64Histogram("db.pgc.operation.duration")
+	// Режим Command (binder == nil)
+	cmd := NewCommand("UPDATE users SET active = true")
+	batcher := NewPgBatcher[string](ctx, mockPg, cmd)
 
-	conn := &pgConnector{
-		pool:     mockPool,
-		tracer:   traceNoop.NewTracerProvider().Tracer("test"),
-		meter:    meter,
-		mLatency: mLatency,
-		cb:       gobreaker.NewCircuitBreaker(gobreaker.Settings{}),
-		now:      time.Now,
-		host:     "localhost",
-		database: "testdb",
-	}
-	conn.isOnline.Store(1)
+	t.Run("Should execute without sending results", func(t *testing.T) {
+		mockPg.EXPECT().
+			SendBatch(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(func(yield func(any, error) bool) {
+				// В режиме Command yield вызывается, но val не используется
+				yield(nil, nil)
+			})
 
-	type User struct{ ID int }
-	query := NewQuery("SELECT id FROM users WHERE id = $1", func(u *User) []any {
-		return []any{&u.ID}
-	})
-	batcher := NewPgBatcher(ctx, conn, query)
-
-	t.Run("Full pipeline: Batcher -> Connector -> MockPool", func(t *testing.T) {
-		mockPool.EXPECT().
-			SendBatch(gomock.Any(), gomock.Any()).
-			Return(mockBR)
-
-		mockBR.EXPECT().Query().Return(mockRows, nil)
-
-		mockRows.EXPECT().Next().Return(true)
-		mockRows.EXPECT().Scan(gomock.Any()).DoAndReturn(func(dest ...any) error {
-			// dest[0] — это указатель на ID (&u.ID)
-			*(dest[0].(*int)) = 42
-			return nil
-		})
-		mockRows.EXPECT().Next().Return(false)
-
-		mockRows.EXPECT().Err().Return(nil).AnyTimes()
-		mockRows.EXPECT().Close().AnyTimes()
-		mockBR.EXPECT().Close().AnyTimes()
-
-		_ = batcher.Push(1)
-
-		resultsChan := make(chan int, 1)
 		go func() {
-			for res, err := range batcher.All() {
-				if err == nil {
-					resultsChan <- res.ID
-				}
-			}
-			close(resultsChan)
+			defer batcher.Close()
+			batcher.Requests() <- BatchEntry[string]{Args: []any{}, Ctx: "task-1"}
 		}()
 
-		err := batcher.Flush()
-		require.NoError(t, err)
-		err = batcher.Close()
-		require.NoError(t, err)
-
-		assert.Equal(t, 42, <-resultsChan)
+		// В режиме Command канал Results закроется, ничего не прислав
+		for res := range batcher.Results() {
+			t.Errorf("expected no results for command, got %+v", res)
+		}
 	})
 }

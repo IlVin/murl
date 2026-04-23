@@ -1,3 +1,6 @@
+// Package handlers содержит реализацию транспортного слоя (HTTP).
+// Пакет отвечает за разбор входящих запросов, валидацию Content-Type,
+// вызов соответствующих методов бизнес-логики и формирование HTTP-ответов.
 package handlers
 
 import (
@@ -8,8 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"murl/internal/config"
+	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/service"
 	"net/http"
 	"strings"
@@ -19,26 +22,29 @@ import (
 
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=handlers_mock_test.go -package=$GOPACKAGE
 
-// Объявляем список используемых параметров конфига
+// HandlersConfig определяет набор параметров конфигурации для работы HTTP-хендлеров.
 type HandlersConfig interface {
 	KeySession() config.KeySession
 }
 
-// Эти методы сервиса используются хэндлерами
+// MicroURLService описывает интерфейс бизнес-логики, необходимый для работы хендлеров.
+// Это позволяет изолировать транспортный слой от конкретной реализации сервиса.
 type MicroURLService interface {
 	AddURL(ctx context.Context, url string) (string, error)
-	Batch(ctx context.Context, e event.PayloadBatch) (event.PayloadBatch, error)
+	Batch(ctx context.Context, e dto.Batch) (dto.Batch, error)
 	GetURL(ctx context.Context, url string) (string, error)
-	GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error)
+	GetURLBySessionID(ctx context.Context, session model.Session) (dto.GetURLBySessionID, error)
 	Ping(ctx context.Context) error
 	DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error
 }
 
+// Handlers объединяет все обработчики HTTP-запросов приложения.
 type Handlers struct {
 	service    MicroURLService
 	keySession config.KeySession
 }
 
+// NewHandlers — конструктор для создания набора HTTP-обработчиков.
 func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	return &Handlers{
 		service:    service,
@@ -60,8 +66,8 @@ func readBody(r *http.Request) ([]byte, error) {
 	return buf, nil
 }
 
-// ErrHandling по ошибке определяет какой http статус выдавать и возвращает ошибку,
-// если запрос не может быть успешным
+// ErrHandling сопоставляет доменные ошибки сервиса с соответствующими HTTP статус-кодами.
+// Возвращает статус и ошибку, если запрос не может быть выполнен.
 func ErrHandling(err error, statusOK int) (int, error) {
 	if err == nil {
 		return statusOK, nil
@@ -85,6 +91,9 @@ func ErrHandling(err error, statusOK int) (int, error) {
 }
 
 // =========== POST / ==================
+
+// AddURL обрабатывает POST запросы с сырым текстом (URL) в теле.
+// Возвращает сокращенный URL в текстовом формате.
 func (h *Handlers) AddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -130,6 +139,8 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 }
 
 // =========== GET /api/user/urls ==================
+
+// APIUserURLs возвращает список всех ссылок, принадлежащих текущему авторизованному пользователю.
 func (h *Handlers) APIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := model.GetSession(r.Context(), h.keySession)
@@ -178,6 +189,8 @@ func (h *Handlers) APIUserURLs() http.HandlerFunc {
 }
 
 // =========== DELETE /api/user/urls ==================
+
+// DeleteAPIUserURLs принимает массив идентификаторов ссылок в JSON для их последующего удаления.
 func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := model.GetSession(r.Context(), h.keySession)
@@ -222,14 +235,19 @@ func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 }
 
 // =========== POST /api/shorten ==================
+
+// APIShortenReq описывает структуру входящего JSON-запроса для сокращения ссылки.
 type APIShortenReq struct {
 	URL string `json:"url"`
 }
 
+// APIShortenResp описывает структуру исходящего JSON-ответа с сокращенной ссылкой.
 type APIShortenResp struct {
 	Result string `json:"result"`
 }
 
+// APIShorten обрабатывает POST запросы с JSON объектом {"url": "..."}.
+// Возвращает JSON объект {"result": "..."}.
 func (h *Handlers) APIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -310,7 +328,7 @@ func (h *Handlers) APIShorten() http.HandlerFunc {
 
 const partSize int = 1000
 
-func (h *Handlers) writePart(ctx context.Context, part event.PayloadBatch, w http.ResponseWriter, isFirst *bool) error {
+func (h *Handlers) writePart(ctx context.Context, part dto.Batch, w http.ResponseWriter, isFirst *bool) error {
 	// Просим сервис обработать batch
 	p, err := h.service.Batch(ctx, part)
 	if err != nil {
@@ -348,6 +366,9 @@ func (h *Handlers) writePart(ctx context.Context, part event.PayloadBatch, w htt
 	return errors.Join(errs...)
 }
 
+// APIShortenBatch реализует потоковую (streaming) обработку больших массивов ссылок.
+// Использует jstream для чтения элементов один за другим, не загружая весь JSON в память.
+// Данные обрабатываются пачками (chunks) и сразу записываются в ResponseWriter в формате JSON-массива.
 func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -373,7 +394,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 
 		slog.Info("APIShortenBatch")
 
-		part := make([]event.PayloadBatchItem, 0, 1000)
+		part := make([]dto.BatchItem, 0, 1000)
 		decoder := jstream.NewDecoder(r.Body, 1) // extract JSON values at a depth level of 1
 		for mv := range decoder.Stream() {
 			v, ok := mv.Value.(map[string]interface{})
@@ -385,7 +406,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 			}
 
 			// Формируем пайлоад
-			p := event.PayloadBatchItem{}
+			p := dto.BatchItem{}
 			if cID, ok := v["correlation_id"]; !ok {
 				continue
 			} else if oURL, ok := v["original_url"]; !ok {
@@ -401,7 +422,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 
 			// Если набралось чуток
 			if len(part) >= partSize {
-				if err := h.writePart(r.Context(), event.PayloadBatch{Batch: part}, w, &isFirst); err != nil {
+				if err := h.writePart(r.Context(), dto.Batch{Batch: part}, w, &isFirst); err != nil {
 					slog.Error("internal error",
 						slog.Any("err", err),
 					)
@@ -414,7 +435,7 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 		}
 		// Если осталось чуток
 		if len(part) > 0 {
-			if err := h.writePart(r.Context(), event.PayloadBatch{Batch: part}, w, &isFirst); err != nil {
+			if err := h.writePart(r.Context(), dto.Batch{Batch: part}, w, &isFirst); err != nil {
 				slog.Error("internal error",
 					slog.Any("err", err),
 				)
@@ -432,6 +453,9 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 }
 
 // =========== GET /{shortURL} ==================
+
+// GetURL обрабатывает GET запросы и выполняет редирект (307 Temporary Redirect) на оригинальный адрес.
+// Возвращает 410 Gone, если ссылка была удалена.
 func (h *Handlers) GetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := h.service.GetURL(r.Context(), r.URL.String())
@@ -447,6 +471,8 @@ func (h *Handlers) GetURL() http.HandlerFunc {
 }
 
 // =========== GET /ping ==================
+
+// Ping проверяет доступность базы данных.
 func (h *Handlers) Ping() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := h.service.Ping(r.Context())
@@ -463,6 +489,8 @@ func (h *Handlers) Ping() http.HandlerFunc {
 }
 
 // =========== DEFAULT ==================
+
+// Default — хендлер-заглушка для обработки неопределенных маршрутов.
 func (h *Handlers) Default() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

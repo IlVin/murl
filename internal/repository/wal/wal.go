@@ -1,3 +1,6 @@
+// Package wal предоставляет реализацию журнала опережающей записи (Write-Ahead Log).
+// Позволяет сохранять поток событий приложения в файл и восстанавливать состояние системы
+// путем последовательного чтения (replay) этого файла.
 package wal
 
 import (
@@ -14,16 +17,20 @@ import (
 
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=wal_mock_test.go -package=$GOPACKAGE
 
+// WAL определяет контракт для записи событий в персистентное хранилище (append-only log).
 type WAL interface {
 	Push(e event.Event) error
 	Close() error
 }
 
+// wal — внутренняя реализация журнала на базе файловой системы.
 type wal struct {
 	mu      sync.Mutex
 	walFile *os.File
 }
 
+// NewWAL создает новый экземпляр журнала по указанному пути.
+// Если файл отсутствует, он будет создан. Метод открывает файл в режиме добавления (Append).
 func NewWAL(path string) (WAL, error) {
 
 	if path == "" {
@@ -41,6 +48,8 @@ func NewWAL(path string) (WAL, error) {
 	return w, nil
 }
 
+// Push записывает событие в лог. Метод гарантирует сброс данных на физический диск (fsync)
+// перед возвратом управления, что обеспечивает высокую надежность при сбоях питания.
 func (w *wal) Push(e event.Event) error {
 	data, err := e.Serialize()
 
@@ -65,6 +74,7 @@ func (w *wal) Push(e event.Event) error {
 	return nil
 }
 
+// Close закрывает файл журнала. После вызова запись новых событий невозможна.
 func (w *wal) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -72,6 +82,9 @@ func (w *wal) Close() error {
 	return w.walFile.Close()
 }
 
+// LoadWAL открывает существующий файл журнала и возвращает канал для чтения событий.
+// Чтение происходит в фоновой горутине. Канал закрывается автоматически при достижении конца файла
+// или при отмене контекста.
 func LoadWAL(ctx context.Context, path string) (chan event.Event, error) {
 	if path == "" {
 		return nil, errors.New("invalid wal path: ''")

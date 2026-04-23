@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"murl/internal/dto"
 	"murl/internal/model/event"
 )
 
@@ -27,10 +28,10 @@ func TestWAL_PushAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	// Создаем реальные события (используем PayloadAddURL как пример)
-	p1 := event.PayloadAddURL{OriginalURL: "https://google.com", ShortURL: "short1"}
+	p1 := dto.AddURL{OriginalURL: "https://google.com", ShortURL: "short1"}
 	ev1, _ := event.MakeEvent(p1, nil)
 
-	p2 := event.PayloadAddURL{OriginalURL: "https://yandex.ru", ShortURL: "short2"}
+	p2 := dto.AddURL{OriginalURL: "https://yandex.ru", ShortURL: "short2"}
 	ev2, _ := event.MakeEvent(p2, nil)
 
 	// Пишем в лог
@@ -62,7 +63,7 @@ func TestLoadWAL_CorruptedData(t *testing.T) {
 	walPath := filepath.Join(tmpDir, "corrupt.wal")
 
 	// Вручную создаем файл с одной валидной и одной битой строкой
-	p := event.PayloadAddURL{OriginalURL: "ok"}
+	p := dto.AddURL{OriginalURL: "ok"}
 	ev, _ := event.MakeEvent(p, nil)
 	data, _ := ev.Serialize()
 
@@ -87,7 +88,7 @@ func TestLoadWAL_ContextCancel(t *testing.T) {
 
 	// Создаем большой файл (имитация)
 	fh, _ := os.Create(walPath)
-	p := event.PayloadAddURL{OriginalURL: "limit"}
+	p := dto.AddURL{OriginalURL: "limit"}
 	ev, _ := event.MakeEvent(p, nil)
 	data, _ := ev.Serialize()
 	for i := 0; i < 100; i++ {

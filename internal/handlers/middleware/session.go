@@ -1,3 +1,6 @@
+// Package middleware содержит обработчики промежуточного слоя для HTTP-запросов.
+// Модуль обеспечивает сквозную функциональность: логирование, сжатие,
+// ограничение нагрузки и управление сессиями.
 package middleware
 
 import (
@@ -20,12 +23,14 @@ const (
 	cookieName string = "murl_session"
 )
 
+// TokenManager описывает интерфейс компонента для управления жизненным циклом JWT.
 type TokenManager interface {
 	VerifyJWT(token string) (model.Session, error)
 	GenerateJWT(session model.Session) (string, error)
 	NeedRemaining(session model.Session) bool // возвращает true, если сессию пора обновить
 }
 
+// SessionConfig объединяет требования к конфигурации для работы Middleware сессий.
 type SessionConfig interface {
 	KeySession() config.KeySession
 	jwtmanager.JWTManagerConfig
@@ -45,7 +50,14 @@ func setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
 	w.Header().Add("Vary", "Cookie, Authorization")
 }
 
-// WithSession проверяет JWT, продлевает его при необходимости и сохраняет сессию в контекст
+// WithSession возвращает Middleware, которая идентифицирует пользователя по JWT.
+//
+// Логика работы:
+// 1. Извлекает токен из заголовка Authorization (Bearer) или куки "murl_session".
+// 2. Если токен валиден: проверяет необходимость продления через NeedRemaining.
+// 3. Если токена нет или он невалиден: автоматически создает новую гостевую сессию.
+// 4. Помещает объект model.Session в контекст запроса.
+// 5. Устанавливает обновленный или новый токен в HTTP-куку.
 func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 	keySession := cfg.KeySession()
 
@@ -109,6 +121,8 @@ func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 	}
 }
 
+// extractToken выполняет поиск JWT в запросе.
+// Приоритет отдается заголовку Authorization, затем проверяются Cookie.
 func extractToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {

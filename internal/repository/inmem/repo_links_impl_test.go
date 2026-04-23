@@ -3,8 +3,8 @@ package inmem
 import (
 	"context"
 	"math"
+	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/repository"
 	"testing"
 
@@ -121,8 +121,8 @@ func TestBatchUpSert(t *testing.T) {
 	repo := setupRepo(t, 4)
 
 	t.Run("Batch Success", func(t *testing.T) {
-		batch := event.PayloadBatch{
-			Batch: []event.PayloadBatchItem{
+		batch := dto.Batch{
+			Batch: []dto.BatchItem{
 				{OriginalURL: "url1"},
 				{OriginalURL: "url2"},
 			},

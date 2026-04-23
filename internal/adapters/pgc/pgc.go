@@ -1,3 +1,5 @@
+// Package pgc предоставляет типизированную обертку над драйвером PostgreSQL,
+// поддерживающую итераторы Go 1.23, телеметрию и автоматические проверки типов.
 package pgc
 
 import (
@@ -17,58 +19,55 @@ import (
 
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE         -destination=pgc_mock_test.go  -package=$GOPACKAGE
 
-// --- Интерфейсы ---
+// ... импорты ...
 
-// PgQuery описывает нетипизированный манифест SQL запроса
+// PgQuery описывает нетипизированный манифест SQL запроса.
+// Обычно реализуется автоматически сгенерированными структурами.
 type PgQuery interface {
+	// SQL возвращает строку запроса с плейсхолдерами ($1, $2...).
 	SQL() string
+	// Name возвращает уникальное имя запроса для логирования и метрик.
 	Name() string
+	// IsReadOnly возвращает true, если запрос не изменяет данные.
 	IsReadOnly() bool
+	// HasReturns возвращает true, если запрос подразумевает возврат строк.
 	HasReturns() bool
+	// Binder связывает поля структуры с аргументами запроса.
 	Binder(target any) []any
+	// NewTarget создает новый экземпляр структуры для сканирования результата.
 	NewTarget() any // Создает новый экземпляр структуры T
 }
 
-// PgInstance — интерфейс любого исполнителя SQL запроса.
+// PgInstance определяет интерфейс исполнителя запросов.
+// Позволяет абстрагировать бизнес-логику от конкретной реализации (pool, conn, transaction).
 type PgInstance interface {
-
-	// Fetch выполняет запрос и возвращает итератор
+	// Fetch выполняет запрос и возвращает итератор для ленивого чтения строк.
 	Fetch(ctx context.Context, q PgQuery, args ...any) iter.Seq2[any, error]
-
-	// FetchRow выполняет запрос на одну строку
+	// FetchRow выполняет запрос и возвращает одну строку. Если строк нет, возвращает ошибку.
 	FetchRow(ctx context.Context, q PgQuery, args ...any) (any, error)
-
-	// Exec выполняет команду (INSERT/UPDATE/DELETE)
+	// Exec выполняет команду (INSERT/UPDATE/DELETE) и возвращает количество затронутых строк.
 	Exec(ctx context.Context, q PgQuery, args ...any) (int64, error)
-
-	// SendBatch выполняет пакет однотипных запросов.
-	// Возвращает плоский поток результатов (один за другим).
+	// SendBatch выполняет пакет однотипных запросов в одной транзакции/пакете.
 	SendBatch(ctx context.Context, q PgQuery, args [][]any) iter.Seq2[any, error]
-
-	// IsOnline признак того, что соединение с БД не отключено предохранителем
+	// IsOnline проверяет, доступен ли инстанс для выполнения запросов.
 	IsOnline() bool
-
-	// RunMigrations запуск миграций на инстансе
+	// RunMigrations запускает встроенные миграции для текущего инстанса.
 	RunMigrations(ctx context.Context) error
-
-	// String стрингер "hostname:port/database"
+	// String возвращает строковое представление подключения (host:port/db).
 	String() string
-
-	// Ping Проверяет работоспособность БД.
+	// Ping проверяет физическое соединение с базой данных.
 	Ping(ctx context.Context) error
-
-	// Close перевод хэндла в IsClosed && !IsReady режим
+	// Close корректно завершает работу инстанса.
 	Close(ctx context.Context) error
 
-	// Кастомные настройки провайдеров Tracer, Meter, Logger
+	// Настройки телеметрии
 	WithTracerProvider(trace.TracerProvider) PgInstance
 	WithMeterProvider(metric.MeterProvider) PgInstance
 	WithSlogHandler(slog.Handler) PgInstance
 }
 
-// --- Извлечение данных ---
-
-// Fetch извлекает поток данных в стиле Go 1.23 Iterators.
+// Fetch — это типизированная обертка над PgInstance.Fetch.
+// Использует итераторы Go 1.23 для удобного обхода результатов в цикле for-range.
 func Fetch[T any](ctx context.Context, pg PgInstance, q *Query[T], args ...any) iter.Seq2[T, error] {
 	rawSeq := pg.Fetch(ctx, q, args...)
 	return func(yield func(T, error) bool) {
@@ -98,7 +97,8 @@ func Fetch[T any](ctx context.Context, pg PgInstance, q *Query[T], args ...any) 
 	}
 }
 
-// FetchRow извлекает ровно одну строку.
+// FetchRow — это типизированная обертка над PgInstance.FetchRow.
+// Возвращает ровно один экземпляр типа T или ошибку.
 func FetchRow[T any](ctx context.Context, pg PgInstance, q *Query[T], args ...any) (T, error) {
 	var zero T
 	res, err := pg.FetchRow(ctx, q, args...)
@@ -113,7 +113,8 @@ func FetchRow[T any](ctx context.Context, pg PgInstance, q *Query[T], args ...an
 	return *ptr, nil
 }
 
-// Exec выполняет команду (INSERT/UPDATE/DELETE).
+// FetchRow — это типизированная обертка над PgInstance.Exec.
+// Возвращает количество измененных строк или ошибку.
 func Exec(ctx context.Context, pg PgInstance, q PgQuery, args ...any) (int64, error) {
 	return pg.Exec(ctx, q, args...)
 }

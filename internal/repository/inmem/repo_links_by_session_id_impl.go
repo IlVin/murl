@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/repository"
 )
 
@@ -67,8 +67,8 @@ func (r *InMemRepoLinksBySessionID) UpSert(ctx context.Context, sessionID string
 }
 
 // SelectAll получить по sessionID строке все URL в формате [{"short_url": "http://...","original_url": "http://..."},...]
-func (r *InMemRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID string) ([]event.PayloadURLItem, error) {
-	result := make([]event.PayloadURLItem, 0, 100)
+func (r *InMemRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID string) ([]dto.URLItem, error) {
+	result := make([]dto.URLItem, 0, 100)
 
 	shardID := model.ShardID(sessionID, r.c.Size())
 	shard, err := r.c.GetShard(shardID)
@@ -88,7 +88,7 @@ func (r *InMemRepoLinksBySessionID) SelectAll(ctx context.Context, sessionID str
 		if originalURL, ok := shard.Data[data[i]]; ok {
 			shortPath, err := model.MakeShortPath(shardID, data[i])
 			if err == nil {
-				result = append(result, event.PayloadURLItem{
+				result = append(result, dto.URLItem{
 					OriginalURL: originalURL,
 					ShortURL:    shortPath,
 				})
@@ -151,13 +151,13 @@ func (r *InMemRepoLinksBySessionID) Set(ctx context.Context, sessionID string, o
 }
 
 // BatchDeleteBySessionID - Создает отложенный батч на удаление URL по SessionID
-func (r *InMemRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessionID string, batch event.PayloadDeleteURLBySessionID) error {
+func (r *InMemRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessionID string, batch dto.DeleteURLBySessionID) error {
 	slog.Error("BatchDelBySessionID is not implemented")
 	return nil
 }
 
 // BatchUpSert пакетная установка URL
-func (r *InMemRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID string, b event.PayloadBatch) event.PayloadBatch {
+func (r *InMemRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID string, b dto.Batch) dto.Batch {
 	for i := range b.Batch {
 		if len(b.Batch[i].Err) > 0 {
 			continue

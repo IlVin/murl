@@ -3,43 +3,46 @@ package pgc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
 
 const (
-	// DefaultBatchLimit defines how many queries are packed into a single network roundtrip.
+	// DefaultBatchLimit определяет, сколько запросов упаковывается в один сетевой пакет (roundtrip).
 	DefaultBatchLimit = 50
-	// DefaultResultsLimit defines the buffer size for results to provide backpressure.
+	// DefaultResultsLimit определяет размер буфера канала результатов для обеспечения backpressure.
 	DefaultResultsLimit = 1000
-	// maxRetries defines the maximum number of attempts for retryable database errors.
+	// maxRetries определяет максимальное количество попыток для повторяемых (retryable) ошибок БД.
 	maxRetries = 3
-	// flushInterval defines how long to wait before sending a partial batch.
+	// flushInterval определяет время ожидания перед отправкой неполного пакета.
 	flushInterval = 10 * time.Millisecond
 )
 
-// BatchEntry links SQL arguments with a user-defined context.
+// BatchEntry связывает аргументы SQL-запроса с пользовательским контекстом.
+// Тип C (comparable) используется для идентификации конкретного задания в потоке результатов.
 type BatchEntry[C comparable] struct {
 	Args     []any // SQL query parameters.
 	Ctx      C     // User-defined context for identifying the result.
 	attempts int
 }
 
-// BatchResult represents the outcome of a single operation in a batch.
+// BatchResult представляет результат выполнения отдельной операции в пакете.
 type BatchResult[T any, C comparable] struct {
-	Data          T     // Scanned result data of type T.
-	Err           error // Error if the operation failed.
-	Ctx           C     // Original user context linked to this result.
-	IsLastInBatch bool  // Sentinel flag signaling the completion of a logical batch.
+	Data          T     // Отсканированные данные типа T.
+	Err           error // Ошибка, если операция завершилась неудачей.
+	Ctx           C     // Исходный пользовательский контекст, связанный с этим результатом.
+	IsLastInBatch bool  // Признак завершения логического пакета (sentinel flag).
 }
 
-// PgBatcher defines the interface for a typed streaming database pipeline.
+// PgBatcher определяет интерфейс для типизированного конвейера (pipeline) базы данных.
+// Позволяет отправлять запросы пачками, автоматически обрабатывая ретраи и тайм-ауты накопления.
 type PgBatcher[T any, C comparable] interface {
-	// Requests returns the write-only channel for submitting new jobs.
+	// Requests возвращает канал только для записи для отправки новых заданий.
 	Requests() chan<- BatchEntry[C]
-	// Results returns the read-only channel for consuming operation outcomes.
+	// Results возвращает канал только для чтения для получения результатов операций.
 	Results() <-chan BatchResult[T, C]
-	// Close performs a graceful shutdown, flushing all pending tasks and retries.
+	// Close выполняет грациозное завершение: сбрасывает остатки очереди и дожидается завершения ретраев.
 	Close() error
 }
 
@@ -54,8 +57,8 @@ type pgBatcher[T any, C comparable] struct {
 	wg       sync.WaitGroup
 }
 
-// NewBatcher creates a new PgBatcher instance.
-// Type C (Context) must be provided explicitly, while T (Result) is inferred from the Query.
+// NewPgBatcher создает новый экземпляр пакетного исполнителя.
+// Тип C (Context) должен быть указан явно, тип T (Result) выводится из Query.
 func NewPgBatcher[C comparable, T any](ctx context.Context, pg PgInstance, q *Query[T]) PgBatcher[T, C] {
 	c, cancel := context.WithCancel(ctx)
 	b := &pgBatcher[T, C]{
@@ -72,12 +75,13 @@ func NewPgBatcher[C comparable, T any](ctx context.Context, pg PgInstance, q *Qu
 	return b
 }
 
-// Requests implements the PgBatcher interface.
+// Requests возвращает канал для отправки заданий. Реализует PgBatcher.
 func (b *pgBatcher[T, C]) Requests() chan<- BatchEntry[C] { return b.requests }
 
-// Results implements the PgBatcher interface.
+// Results возвращает канал для чтения результатов. Реализует PgBatcher.
 func (b *pgBatcher[T, C]) Results() <-chan BatchResult[T, C] { return b.results }
 
+// worker — основной цикл накопления и отправки пакетов.
 func (b *pgBatcher[T, C]) worker() {
 	defer b.wg.Done()
 	defer close(b.results)
@@ -101,8 +105,10 @@ func (b *pgBatcher[T, C]) worker() {
 		case entry, ok := <-b.requests:
 			if !ok {
 				finalBatch := append(batch, retryQueue...)
-				if len(finalBatch) > 0 {
-					b.execute(finalBatch, nil)
+				for len(finalBatch) > 0 {
+					tempRetry := make([]BatchEntry[C], 0, len(finalBatch))
+					b.execute(finalBatch, &tempRetry)
+					finalBatch = tempRetry
 				}
 				return
 			}
@@ -129,6 +135,7 @@ func (b *pgBatcher[T, C]) worker() {
 	}
 }
 
+// execute выполняет физическую отправку пакета в PgInstance и обрабатывает ошибки.
 func (b *pgBatcher[T, C]) execute(toWork []BatchEntry[C], retryQueue *[]BatchEntry[C]) {
 	argsMatrix := make([][]any, len(toWork))
 	for i := range toWork {
@@ -161,6 +168,13 @@ func (b *pgBatcher[T, C]) execute(toWork []BatchEntry[C], retryQueue *[]BatchEnt
 	}
 
 	if lastErr != nil {
+		// Если результаты никто не ждет (режим Command), логируем ошибку здесь,
+		// иначе она может молча исчезнуть в методе send из-за select default.
+		if !hasReturns {
+			slog.Error("pgc: batch execution failed",
+				"query", b.query.Name(),
+				"err", lastErr)
+		}
 		remaining := toWork[processed:]
 		if isRetryable(lastErr) && retryQueue != nil {
 			for i, entry := range remaining {
@@ -188,6 +202,7 @@ func (b *pgBatcher[T, C]) execute(toWork []BatchEntry[C], retryQueue *[]BatchEnt
 	}
 }
 
+// send отправляет результат в канал, учитывая контекст завершения.
 func (b *pgBatcher[T, C]) send(res BatchResult[T, C]) {
 	select {
 	case b.results <- res:
@@ -196,7 +211,7 @@ func (b *pgBatcher[T, C]) send(res BatchResult[T, C]) {
 	}
 }
 
-// Close implements the PgBatcher interface.
+// Close закрывает входной канал и ожидает завершения обработки всех задач. Реализует PgBatcher.
 func (b *pgBatcher[T, C]) Close() error {
 	close(b.requests)
 	b.wg.Wait()

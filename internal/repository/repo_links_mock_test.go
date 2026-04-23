@@ -11,7 +11,7 @@ package repository
 
 import (
 	context "context"
-	event "murl/internal/model/event"
+	dto "murl/internal/dto"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -42,10 +42,10 @@ func (m *MockRepoLinks) EXPECT() *MockRepoLinksMockRecorder {
 }
 
 // BatchUpSert mocks base method.
-func (m *MockRepoLinks) BatchUpSert(ctx context.Context, batch event.PayloadBatch) event.PayloadBatch {
+func (m *MockRepoLinks) BatchUpSert(ctx context.Context, batch dto.Batch) dto.Batch {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "BatchUpSert", ctx, batch)
-	ret0, _ := ret[0].(event.PayloadBatch)
+	ret0, _ := ret[0].(dto.Batch)
 	return ret0
 }
 

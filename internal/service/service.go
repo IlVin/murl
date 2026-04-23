@@ -1,3 +1,6 @@
+// Package service содержит реализацию прикладного слоя приложения (Use Cases).
+// Сервис инкапсулирует правила валидации, нормализации URL и координацию
+// работы между хранилищем и системой аудита.
 package service
 
 import (
@@ -10,7 +13,6 @@ import (
 	"murl/internal/domain"
 	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/repository"
 	"net/url"
 	"time"
@@ -21,24 +23,33 @@ import (
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=service_mock_test.go -package=$GOPACKAGE
 //go:generate $GOPATH/bin/mockgen -source=../repository/repo.go -destination=service_repo_mock_test.go -package=$GOPACKAGE
 
-var ErrInvalidURLFormat = errors.New("invalid URL format")
-var ErrDomainIsBlocked = errors.New("domain is blocked")
-var ErrConflict = errors.New("URL is already shortened")
-var ErrQuotaReached = errors.New("quota reached")
-var ErrNoContent = errors.New("no content")
-var ErrGone = errors.New("gone")
+var (
+	// ErrInvalidURLFormat возвращается, если предоставленная строка не является корректным URL.
+	ErrInvalidURLFormat = errors.New("invalid URL format")
+	// ErrDomainIsBlocked возвращается при попытке сократить URL, указывающий на сам сервис (защита от циклов).
+	ErrDomainIsBlocked = errors.New("domain is blocked")
+	// ErrConflict сигнализирует о том, что данный URL уже был сокращен ранее (используется для статуса 409).
+	ErrConflict = errors.New("URL is already shortened")
+	// ErrQuotaReached возвращается при превышении лимитов пользователя.
+	ErrQuotaReached = errors.New("quota reached")
+	// ErrNoContent возвращается, если запрос не вернул данных.
+	ErrNoContent = errors.New("no content")
+	// ErrGone возвращается, если ссылка была удалена владельцем (статус 410).
+	ErrGone = errors.New("gone")
+)
 
-// Объявляем список используемых параметров конфига
+// ServiceConfig определяет набор параметров конфигурации, необходимых для работы сервиса.
 type ServiceConfig interface {
 	ShortBaseURL() config.ShortBaseURL
 	KeySession() config.KeySession
 }
 
-// Тип, поддерживающий прием нотификаций
+// AuditlogNotifier описывает интерфейс для отправки асинхронных уведомлений аудита.
 type AuditlogNotifier interface {
 	Notify(ctx context.Context, n domain.Notification) error
 }
 
+// Service — основной компонент бизнес-логики приложения.
 type Service struct {
 	shortBaseURL config.ShortBaseURL
 	repo         repository.Repo
@@ -46,6 +57,7 @@ type Service struct {
 	keySession   config.KeySession
 }
 
+// NewService создает новый экземпляр бизнес-сервиса.
 func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo, an AuditlogNotifier) *Service {
 	return &Service{
 		shortBaseURL: cfg.ShortBaseURL(),
@@ -55,6 +67,8 @@ func NewService(ctx context.Context, cfg ServiceConfig, repo repository.Repo, an
 	}
 }
 
+// NormalizeURL выполняет парсинг и валидацию входящего URL.
+// Проверяет наличие схемы (http/https) и абсолютность пути.
 func (s *Service) NormalizeURL(ctx context.Context, originalURL string) (*url.URL, error) {
 	u, err := url.Parse(originalURL)
 	if err != nil {
@@ -81,17 +95,11 @@ func (s *Service) NormalizeURL(ctx context.Context, originalURL string) (*url.UR
 	return u, nil
 }
 
+// DeleteURLBySessionID инициирует процесс массового удаления ссылок пользователя.
 func (s *Service) DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error {
 	shortURLs := make([]string, 0, len(data))
 	for i := range data {
 		shortURLs = append(shortURLs, "/"+data[i])
-	}
-	e, err := event.MakeEvent(event.PayloadDeleteURLBySessionID{
-		SessionID: session.ID,
-		ShortURLs: shortURLs,
-	}, nil)
-	if err != nil {
-		return fmt.Errorf("make EvDeleteURLBySessionID fail: %w", err)
 	}
 
 	slog.Info("service.DeleteURLBySessionID",
@@ -99,43 +107,43 @@ func (s *Service) DeleteURLBySessionID(ctx context.Context, session model.Sessio
 		slog.Any("shortURLs", shortURLs),
 	)
 
-	if _, err := s.repo.On(ctx, e); err != nil {
-		return fmt.Errorf("on EvDeleteURLBySessionID fail: %w", err)
+	err := s.repo.DeleteURLBySessionID(
+		ctx,
+		dto.DeleteURLBySessionID{
+			SessionID: session.ID,
+			ShortURLs: shortURLs,
+		})
+	if err != nil {
+		return fmt.Errorf("repo.DeleteURLBySessionID fail: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Service) GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error) {
-	e, err := event.MakeEvent(event.PayloadGetURLBySessionID{SessionID: session.ID}, nil)
+// GetURLBySessionID возвращает список всех сокращенных ссылок пользователя,
+// преобразуя внутренние пути в полные URL.
+func (s *Service) GetURLBySessionID(ctx context.Context, session model.Session) (dto.GetURLBySessionID, error) {
+	res, err := s.repo.GetURLBySessionID(ctx, dto.GetURLBySessionID{SessionID: session.ID})
 	if err != nil {
-		return nil, fmt.Errorf("make EvGetURLBySessionID fail: %w", err)
-	}
-
-	res, err := s.repo.On(ctx, e)
-	if err != nil {
-		return nil, fmt.Errorf("on EvGetURLBySessionID fail: %w", err)
-	}
-
-	p, err := event.GetPayload[event.PayloadGetURLBySessionID](res)
-	if err != nil {
-		return nil, fmt.Errorf("fetch PayloadGetURLBySessionID fail: %w", err)
+		return res, fmt.Errorf("repo.GetURLBySessionID fail: %w", err)
 	}
 
 	// Конвертируем ShortPath в ShortURL
 	u := s.shortBaseURL.URL
-	for i := range p.Result {
-		u.Path = p.Result[i].ShortURL
-		p.Result[i].ShortURL = u.String()
+	for i := range res.Result {
+		u.Path = res.Result[i].ShortURL
+		res.Result[i].ShortURL = u.String()
 	}
 
-	if len(p.Result) == 0 {
-		return &p, ErrNoContent
+	if len(res.Result) == 0 {
+		return res, ErrNoContent
 	}
 
-	return &p, nil
+	return res, nil
 }
 
+// AddURL сокращает переданный URL. Автоматически определяет контекст (анонимно/сессия),
+// проверяет дубликаты и отправляет событие "shorten" в систему аудита.
 func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error) {
 	// Нормализация URL
 	normalizedURL, err := s.NormalizeURL(ctx, originalURL)
@@ -148,58 +156,36 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 		return "", ErrDomainIsBlocked
 	}
 
-	// Запись URL в БД
-	var e event.Event
-	var session model.Session
-	var sessionMode bool
-	if session, sessionMode = model.GetSession(ctx, s.keySession); sessionMode {
-		e, err = event.MakeEvent(
-			event.PayloadAddURLBySessionID{
-				OriginalURL: normalizedURL.String(),
-				SessionID:   session.ID,
-			},
-			nil,
-		)
-	} else {
-		e, err = event.MakeEvent(
-			event.PayloadAddURL{
-				OriginalURL: normalizedURL.String(),
-			},
-			nil,
-		)
-	}
-	if err != nil {
-		return "", fmt.Errorf("failed to persist data: %w", err)
-	}
-
-	resEvent, err := s.repo.On(ctx, e)
-	if err != nil {
-		return "", fmt.Errorf("failed to persist data: %w", err)
-	}
-
 	u := s.shortBaseURL.URL
 	var conflictFlag bool
-	if sessionMode {
-		p, err := event.GetPayload[event.PayloadAddURLBySessionID](resEvent)
-		if err != nil {
-			return "", fmt.Errorf("failed to persist data: %w", err)
-		}
-		u.Path = p.ShortURL
-		conflictFlag = p.ConflictFlag
-	} else {
-		p, err := event.GetPayload[event.PayloadAddURL](resEvent)
-		if err != nil {
-			return "", fmt.Errorf("failed to persist data: %w", err)
-		}
-		u.Path = p.ShortURL
-		conflictFlag = p.ConflictFlag
-	}
+	var session model.Session
 
-	slog.Info("service.AddURL",
-		slog.String("original_url", originalURL),
-		slog.String("short_url", u.String()),
-		slog.Bool("conflict_flag", conflictFlag),
-	)
+	if session, sessionMode := model.GetSession(ctx, s.keySession); sessionMode {
+		res, err := s.repo.AddURLBySessionID(
+			ctx,
+			dto.AddURLBySessionID{
+				AddURL: dto.AddURL{
+					OriginalURL: normalizedURL.String(),
+				},
+				SessionID: session.ID,
+			})
+		if err != nil {
+			return "", fmt.Errorf("failed to persist data: %w", err)
+		}
+		u.Path = res.ShortURL
+		conflictFlag = res.ConflictFlag
+	} else {
+		res, err := s.repo.AddURL(
+			ctx,
+			dto.AddURL{
+				OriginalURL: normalizedURL.String(),
+			})
+		if err != nil {
+			return "", fmt.Errorf("failed to persist data: %w", err)
+		}
+		u.Path = res.ShortURL
+		conflictFlag = res.ConflictFlag
+	}
 
 	// Отправляем нотификацию
 	notifCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
@@ -236,45 +222,44 @@ func (s *Service) sendNotification(ctx context.Context, action string, userID *u
 	return nil
 }
 
+// GetURL возвращает оригинальный URL по короткому идентификатору.
+// При каждом успешном запросе отправляет событие "follow" в аудит.
 func (s *Service) GetURL(ctx context.Context, sURL string) (string, error) {
-	e, err := event.MakeEvent(event.PayloadGetURL{ShortURL: sURL}, nil)
-	if err != nil {
-		return "", fmt.Errorf("make event EvGetURL fail: %w", err)
-	}
-
-	res, err := s.repo.On(ctx, e)
+	res, err := s.repo.GetURL(
+		ctx,
+		dto.GetURL{
+			ShortURL: sURL,
+		},
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to retrieve data: %w", err)
 	}
 
-	p, err := event.GetPayload[event.PayloadGetURL](res)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch data: %w", err)
-	}
-
-	if p.IsGone {
-		return p.OriginalURL, ErrGone
+	if res.IsGone {
+		return res.OriginalURL, ErrGone
 	}
 
 	// Отправляем нотификацию
 	notifCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
-	errNotif := s.sendNotification(notifCtx, "follow", nil, p.OriginalURL)
+	errNotif := s.sendNotification(notifCtx, "follow", nil, res.OriginalURL)
 	if errNotif != nil {
 		slog.Error("audit log notification failure",
 			slog.Any("err", err),
 		)
 	}
 
-	return p.OriginalURL, nil
+	return res.OriginalURL, nil
 }
 
+// Ping проверяет работоспособность нижележащего хранилища.
 func (s *Service) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
 }
 
-// Batch получает на вход event.PayloadBatch и возращает готовое event.PayloadBatch
-func (s *Service) Batch(ctx context.Context, p event.PayloadBatch) (event.PayloadBatch, error) {
+// Batch выполняет пакетное сокращение списка URL.
+// Ошибки нормализации конкретных строк записываются в поле Err соответствующих BatchItem.
+func (s *Service) Batch(ctx context.Context, p dto.Batch) (dto.Batch, error) {
 
 	// Нормализация OriginalURL
 	for i := range p.Batch {
@@ -286,31 +271,21 @@ func (s *Service) Batch(ctx context.Context, p event.PayloadBatch) (event.Payloa
 		}
 	}
 
-	e, err := event.MakeEvent(p, nil)
-	if err != nil {
-		return p, err
-	}
-
 	// Записываем в хранилище
-	resEvent, err := s.repo.On(ctx, e)
+	res, err := s.repo.Batch(ctx, p)
 	if err != nil {
 		return p, err
-	}
-
-	resPayload, err := event.GetPayload[event.PayloadBatch](resEvent)
-	if err != nil {
-		return resPayload, err
 	}
 
 	// Генерируем ShortURL
-	for i := range resPayload.Batch {
+	for i := range res.Batch {
 		// Генерируем короткий URL
 		sURL := s.shortBaseURL.URL
-		sURL.Path = resPayload.Batch[i].ShortURL
+		sURL.Path = res.Batch[i].ShortURL
 
-		resPayload.Batch[i].ShortURL = sURL.String()
-		resPayload.Batch[i].OriginalURL = ""
+		res.Batch[i].ShortURL = sURL.String()
+		res.Batch[i].OriginalURL = ""
 	}
 
-	return resPayload, nil
+	return res, nil
 }

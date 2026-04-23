@@ -12,8 +12,8 @@ package handlers
 import (
 	context "context"
 	config "murl/internal/config"
+	dto "murl/internal/dto"
 	model "murl/internal/model"
-	event "murl/internal/model/event"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -97,10 +97,10 @@ func (mr *MockMicroURLServiceMockRecorder) AddURL(ctx, url any) *gomock.Call {
 }
 
 // Batch mocks base method.
-func (m *MockMicroURLService) Batch(ctx context.Context, e event.PayloadBatch) (event.PayloadBatch, error) {
+func (m *MockMicroURLService) Batch(ctx context.Context, e dto.Batch) (dto.Batch, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Batch", ctx, e)
-	ret0, _ := ret[0].(event.PayloadBatch)
+	ret0, _ := ret[0].(dto.Batch)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -141,10 +141,10 @@ func (mr *MockMicroURLServiceMockRecorder) GetURL(ctx, url any) *gomock.Call {
 }
 
 // GetURLBySessionID mocks base method.
-func (m *MockMicroURLService) GetURLBySessionID(ctx context.Context, session model.Session) (*event.PayloadGetURLBySessionID, error) {
+func (m *MockMicroURLService) GetURLBySessionID(ctx context.Context, session model.Session) (dto.GetURLBySessionID, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetURLBySessionID", ctx, session)
-	ret0, _ := ret[0].(*event.PayloadGetURLBySessionID)
+	ret0, _ := ret[0].(dto.GetURLBySessionID)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

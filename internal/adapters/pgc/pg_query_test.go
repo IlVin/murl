@@ -96,3 +96,56 @@ func TestQuery_PointerType(t *testing.T) {
 	q := NewQuery[*testModel]("SELECT 1", nil)
 	assert.Contains(t, q.Name(), "testModel")
 }
+
+// User — тестовая структура для бенчмарков
+type UserBench struct {
+	ID    int64
+	Email string
+	Age   int
+}
+
+// BenchmarkNewQuery измеряет накладные расходы на создание манифеста запроса.
+// Включает в себя рефлексию для получения имени типа и runtime.Caller для локации.
+func BenchmarkNewQuery(b *testing.B) {
+	sql := "SELECT id, email, age FROM users WHERE id = $1"
+	binder := func(u *UserBench) []any {
+		return []any{&u.ID, &u.Email, &u.Age}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = NewQuery(sql, binder)
+	}
+}
+
+// BenchmarkQuery_Binder измеряет скорость типизированного связывания полей.
+// Это имитация того, что происходит внутри каждой итерации при сканировании строк из БД.
+func BenchmarkQuery_Binder(b *testing.B) {
+	q := NewQuery("SELECT...", func(u *UserBench) []any {
+		return []any{&u.ID, &u.Email, &u.Age}
+	})
+
+	target := q.NewTarget() // Создаем один раз
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Имитируем вызов драйвером для каждой строки
+		fields := q.Binder(target)
+		if len(fields) != 3 {
+			b.Fatal("invalid binder output")
+		}
+	}
+}
+
+// BenchmarkNewCommand измеряет скорость создания простых команд без биндера.
+func BenchmarkNewCommand(b *testing.B) {
+	sql := "DELETE FROM users WHERE id = $1"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = NewCommand(sql)
+	}
+}

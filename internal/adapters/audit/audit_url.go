@@ -11,26 +11,30 @@ import (
 )
 
 var (
-	ErrNoContent       = errors.New("order not registered in accrual")
+	// ErrNoContent возвращается, если система регистрации вернула такое.
+	ErrNoContent = errors.New("no content")
+	// ErrTooManyRequests возвращается при превышении лимита запросов (rate limiting).
 	ErrTooManyRequests = errors.New("rate limited")
-	ErrInternalError   = errors.New("accrual internal server error")
+	// ErrInternalError возвращается при внутренней ошибке сервера аудита.
+	ErrInternalError = errors.New("accrual internal server error")
 )
 
-/*
-Стратегия записи в аудит URL:
-Мы записываем важные данные, поэтому обрывать HTTP запрос на полуслове и рушить JSON формат нельзя.
-Поэтому HTTP клиент полагается только на внутренний таймаут, а не на проброшенный контекст.
-Почему мы можем ждать окончания HTTP запроса: потому, что обсервер при завершении работы программы
-ждет завершения работы всех своих воркеров, т.е. принцип Gracefull shutdown будет соблюден
-*/
-
+// URLAuditlog реализует отправку уведомлений во внешнюю систему через HTTP POST.
+//
+// Стратегия обработки запросов:
+// Для обеспечения целостности данных (сохранение корректного JSON-формата)
+// HTTP-клиент игнорирует проброшенный контекст и полагается исключительно
+// на собственный внутренний Timeout. Это гарантирует, что запрос не будет
+// прерван "на полуслове". Безопасность при завершении приложения обеспечивается
+// механизмом Graceful Shutdown на уровне обсервера воркеров.
 type URLAuditlog struct {
 	id         string
 	httpClient *http.Client
 	baseURL    string
 }
 
-// NewURLAuditlog конструктор
+// NewURLAuditlog создает новый экземпляр аудитора, отправляющего данные по URL.
+// Параметр id используется для идентификации потребителя в системе нотификаций.
 func NewURLAuditlog(id string, u string) *URLAuditlog {
 	return &URLAuditlog{
 		id:      id,
@@ -42,12 +46,13 @@ func NewURLAuditlog(id string, u string) *URLAuditlog {
 	}
 }
 
-// GetID возвращает ID потребителя нотификаций
+// GetID возвращает уникальный идентификатор аудитора.
 func (u *URLAuditlog) GetID() string {
 	return u.id
 }
 
-// Update отправляет нотификацию в Audit URL
+// Update отправляет нотификацию во внешнюю систему.
+// Метод преобразует доменную модель уведомления в HTTP POST запрос с JSON-телом.
 func (u *URLAuditlog) Update(notif domain.Notification) error {
 	req, err := http.NewRequest(http.MethodPost, u.baseURL, bytes.NewReader(notif.Message))
 	if err != nil {

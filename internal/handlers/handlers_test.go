@@ -13,7 +13,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"murl/internal/config"
-	"murl/internal/model/event"
+	"murl/internal/dto"
 	"murl/internal/service"
 )
 
@@ -92,7 +92,7 @@ func TestHandlers_APIShortenBatch_Streaming(t *testing.T) {
 	// Ожидаемое поведение сервиса
 	mockSvc.EXPECT().
 		Batch(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, p event.PayloadBatch) (event.PayloadBatch, error) {
+		DoAndReturn(func(ctx context.Context, p dto.Batch) (dto.Batch, error) {
 			// Проставляем "результаты" сокращения
 			for i := range p.Batch {
 				p.Batch[i].ShortURL = "short_" + p.Batch[i].CorrelationID

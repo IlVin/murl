@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"murl/internal/dto"
 	"murl/internal/model"
-	"murl/internal/model/event"
 	"murl/internal/repository"
 )
 
@@ -118,7 +118,7 @@ func (r *InMemRepoLinks) Set(ctx context.Context, originalURL string, shortPath 
 }
 
 // BatchUpSert пакетная установка URL
-func (r *InMemRepoLinks) BatchUpSert(ctx context.Context, b event.PayloadBatch) event.PayloadBatch {
+func (r *InMemRepoLinks) BatchUpSert(ctx context.Context, b dto.Batch) dto.Batch {
 	for i := range b.Batch {
 		if len(b.Batch[i].Err) > 0 {
 			continue
