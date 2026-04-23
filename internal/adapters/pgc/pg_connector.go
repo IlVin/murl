@@ -131,10 +131,7 @@ func (p *pgConnector) WithSlogHandler(h slog.Handler) PgInstance {
 }
 
 func (p *pgConnector) IsOnline() bool {
-	if p.isOnline.Load() > 0 {
-		return true
-	}
-	return false
+	return p.isOnline.Load() > 0
 }
 
 func (p *pgConnector) Fetch(ctx context.Context, q PgQuery, args ...any) iter.Seq2[any, error] {
