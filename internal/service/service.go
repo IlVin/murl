@@ -159,9 +159,10 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 	u := s.shortBaseURL.URL
 	var conflictFlag bool
 	var session model.Session
+	var sessionMode bool
 
-	if session, sessionMode := model.GetSession(ctx, s.keySession); sessionMode {
-		res, err := s.repo.AddURLBySessionID(
+	if session, sessionMode = model.GetSession(ctx, s.keySession); sessionMode {
+		res, repoErr := s.repo.AddURLBySessionID(
 			ctx,
 			dto.AddURLBySessionID{
 				AddURL: dto.AddURL{
@@ -169,19 +170,19 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 				},
 				SessionID: session.ID,
 			})
-		if err != nil {
-			return "", fmt.Errorf("failed to persist data: %w", err)
+		if repoErr != nil {
+			return "", fmt.Errorf("failed to persist data: %w", repoErr)
 		}
 		u.Path = res.ShortURL
 		conflictFlag = res.ConflictFlag
 	} else {
-		res, err := s.repo.AddURL(
+		res, repoErr := s.repo.AddURL(
 			ctx,
 			dto.AddURL{
 				OriginalURL: normalizedURL.String(),
 			})
-		if err != nil {
-			return "", fmt.Errorf("failed to persist data: %w", err)
+		if repoErr != nil {
+			return "", fmt.Errorf("failed to persist data: %w", repoErr)
 		}
 		u.Path = res.ShortURL
 		conflictFlag = res.ConflictFlag
@@ -193,7 +194,7 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 	errNotif := s.sendNotification(notifCtx, "shorten", &session.ID, originalURL)
 	if errNotif != nil {
 		slog.Error("audit log notification failure",
-			slog.Any("err", err),
+			slog.Any("err", errNotif),
 		)
 	}
 

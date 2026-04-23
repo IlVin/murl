@@ -1,5 +1,7 @@
 # MicroURL
 
+![coverage](https://raw.githubusercontent.com/IlVin/murl/badges/.badges/21/merge/coverage.svg)
+
 HighLoad сервис сокращателя ссылок.  
 Преобразует длинные URL (**LongURL**) в короткие (**ShortURL**) и обратно.
 
