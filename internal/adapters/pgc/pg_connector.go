@@ -242,7 +242,7 @@ func (p *pgConnector) SendBatch(ctx context.Context, q PgQuery, args [][]any) it
 
 func (p *pgConnector) execInternal(ctx context.Context, q PgQuery, op string, fn func(ctx context.Context) (any, error)) (any, error) {
 	return p.cb.Execute(func() (any, error) {
-		ctx, span := p.tracer.Start(ctx, q.Name(), trace.WithAttributes(
+		tracerCtx, span := p.tracer.Start(ctx, q.Name(), trace.WithAttributes(
 			attribute.String("db.system", "postgresql"),
 			attribute.String("db.operation", op),
 			attribute.String("db.query.text", q.SQL()),
@@ -253,7 +253,7 @@ func (p *pgConnector) execInternal(ctx context.Context, q PgQuery, op string, fn
 
 		defer func() {
 			if r := recover(); r != nil {
-				p.logger.ErrorContext(ctx, "panic in db op",
+				p.logger.ErrorContext(tracerCtx, "panic in db op",
 					slog.Any("error", r),
 					slog.String("stack", string(debug.Stack())),
 				)
@@ -265,9 +265,9 @@ func (p *pgConnector) execInternal(ctx context.Context, q PgQuery, op string, fn
 		}()
 
 		start := p.now()
-		res, err := fn(ctx)
+		res, err := fn(tracerCtx)
 
-		p.mLatency.Record(ctx, p.now().Sub(start).Seconds(), metric.WithAttributes(
+		p.mLatency.Record(tracerCtx, p.now().Sub(start).Seconds(), metric.WithAttributes(
 			attribute.String("server.address", p.host),
 			attribute.String("db.namespace", p.database),
 		))

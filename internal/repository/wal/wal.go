@@ -109,10 +109,10 @@ func LoadWAL(ctx context.Context, path string) (chan event.Event, error) {
 		for {
 			data, err := r.ReadBytes('\n')
 			if len(data) > 0 {
-				evt, err := event.Parse(data)
-				if err != nil {
+				evt, errParse := event.Parse(data)
+				if errParse != nil {
 					slog.Error("cannot parse event",
-						slog.Any("err", err),
+						slog.Any("err", errParse),
 					)
 					continue
 				}

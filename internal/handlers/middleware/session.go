@@ -85,8 +85,8 @@ func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 						slog.Debug("session renewal triggered", slog.String("id", session.ID.String()))
 
 						// Генерируем новый токен (время жизни обновится внутри GenerateJWT или менеджером)
-						newToken, err := manager.GenerateJWT(session)
-						if err == nil {
+						newToken, errJWT := manager.GenerateJWT(session)
+						if errJWT == nil {
 							// Перепарсиваем сессию, чтобы получить обновленный TTL для контекста
 							if updated, parseErr := manager.VerifyJWT(newToken); parseErr == nil {
 								session = updated

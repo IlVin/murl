@@ -191,17 +191,18 @@ func (m *cqrsConnector) FetchRow(ctx context.Context, q PgQuery, args ...any) (r
 		}
 
 		db := m.pickNext(isRO, attempt)
-		res, err := db.FetchRow(ctx, q, args...)
-		if err == nil {
+		res, errFetchRow := db.FetchRow(ctx, q, args...)
+		if errFetchRow == nil {
 			span.SetStatus(codes.Ok, "")
 			return res, nil
 		}
 
-		if !isRetryable(err) || attempt == maxAttempts-1 {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
+		if !isRetryable(errFetchRow) || attempt == maxAttempts-1 {
+			span.RecordError(errFetchRow)
+			span.SetStatus(codes.Error, errFetchRow.Error())
+			return nil, errFetchRow
 		}
+		err = errFetchRow
 	}
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())

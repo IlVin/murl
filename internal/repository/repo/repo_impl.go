@@ -51,7 +51,7 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 		if err != nil {
 			return nil, err
 		}
-		if err := r.pgInst.RunMigrations(ctx); err != nil {
+		if err = r.pgInst.RunMigrations(ctx); err != nil {
 			return nil, fmt.Errorf("run migrations fail: %w", err)
 		}
 		r.repoLinks = pg.NewPgRepoLinks(r.pgInst)
@@ -73,12 +73,12 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 			slog.String("path", cfg.EventStoragePath()),
 		)
 		walCtx := context.Background()
-		ch, err := wal.LoadWAL(walCtx, cfg.EventStoragePath())
-		if err != nil {
-			return nil, err
+		ch, errWAL := wal.LoadWAL(walCtx, cfg.EventStoragePath())
+		if errWAL != nil {
+			return nil, errWAL
 		}
 		for e := range ch {
-			if err := r.On(walCtx, e); err != nil {
+			if err = r.On(walCtx, e); err != nil {
 				return r, fmt.Errorf("wal load fail: %w", err)
 			}
 		}
