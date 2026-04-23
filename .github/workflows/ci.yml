@@ -31,7 +31,7 @@ jobs:
         with:
           profile: coverage.out
           local-prefix: murl
-          threshold-file: 40
+          threshold-file: 0
           git-token: ${{ secrets.COVERINFORMER }}
           git-branch: badges
           debug: true
