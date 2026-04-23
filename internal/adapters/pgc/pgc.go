@@ -113,7 +113,7 @@ func FetchRow[T any](ctx context.Context, pg PgInstance, q *Query[T], args ...an
 	return *ptr, nil
 }
 
-// FetchRow — это типизированная обертка над PgInstance.Exec.
+// Exec — это типизированная обертка над PgInstance.Exec.
 // Возвращает количество измененных строк или ошибку.
 func Exec(ctx context.Context, pg PgInstance, q PgQuery, args ...any) (int64, error) {
 	return pg.Exec(ctx, q, args...)

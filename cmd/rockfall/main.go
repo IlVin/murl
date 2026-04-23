@@ -1,3 +1,6 @@
+// Package main предоставляет инструменты для проведения нагрузочного тестирования
+// сервиса сокращения ссылок. Поддерживает одиночные и пакетные операции,
+// проверку авторизации и асинхронное удаление.
 package main
 
 import (
@@ -22,22 +25,26 @@ const (
 	duration    = 3 * time.Minute
 )
 
-// Структуры для API
+// BatchRequest описывает структуру элемента в запросе на пакетное сокращение ссылок.
 type BatchRequest struct {
 	CorrelationID string `json:"correlation_id"`
 	OriginalURL   string `json:"original_url"`
 }
 
+// BatchResponse описывает структуру элемента в ответе на пакетное создание ссылок.
 type BatchResponse struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
 }
 
+// UserURL содержит информацию о паре ссылок, принадлежащих конкретному пользователю.
 type UserURL struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 }
 
+// main инициализирует воркеры и запускает цикл нагрузочного тестирования.
+// В процессе работы собирается статистика по количеству операций, ошибок и задержкам.
 func main() {
 	fmt.Printf("Запуск комплексной нагрузки: %d горутин, время: %s\n", concurrency, duration)
 
@@ -151,6 +158,8 @@ func main() {
 
 // --- Реализация методов ---
 
+// postURL выполняет POST-запрос для сокращения одной ссылки.
+// Возвращает сокращенный URL или ошибку, если статус ответа не 201 или 409.
 func postURL(client *http.Client, longURL string) (string, error) {
 	resp, err := client.Post(baseURL+"/", "text/plain", bytes.NewBufferString(longURL))
 	if err != nil {
@@ -169,6 +178,8 @@ func postURL(client *http.Client, longURL string) (string, error) {
 	return string(body), nil
 }
 
+// verifyURL проверяет работоспособность сокращенной ссылки.
+// Ожидает редирект (307) на оригинальный адрес. Учитывает возможность удаления ссылки (410).
 func verifyURL(client *http.Client, shortURL, originalURL string) error {
 	resp, err := client.Get(shortURL)
 	if err != nil {
@@ -192,6 +203,8 @@ func verifyURL(client *http.Client, shortURL, originalURL string) error {
 	return nil
 }
 
+// postBatch отправляет запрос на генерацию сразу нескольких сокращенных ссылок.
+// Возвращает список созданных коротких ссылок.
 func postBatch(client *http.Client, count int) ([]string, error) {
 	batch := make([]BatchRequest, count)
 	for i := 0; i < count; i++ {
@@ -224,6 +237,7 @@ func postBatch(client *http.Client, count int) ([]string, error) {
 	return urls, nil
 }
 
+// getUserURLs запрашивает список всех ссылок, созданных текущим пользователем (на основе Cookie).
 func getUserURLs(client *http.Client) ([]UserURL, error) {
 	resp, err := client.Get(baseURL + "/api/user/urls")
 	if err != nil {
@@ -242,6 +256,7 @@ func getUserURLs(client *http.Client) ([]UserURL, error) {
 	return urls, nil
 }
 
+// deleteURLs отправляет запрос на пакетное удаление ссылок по их идентификаторам.
 func deleteURLs(client *http.Client, ids []string) error {
 	body, _ := json.Marshal(ids)
 	req, _ := http.NewRequest(http.MethodDelete, baseURL+"/api/user/urls", bytes.NewBuffer(body))
@@ -254,6 +269,7 @@ func deleteURLs(client *http.Client, ids []string) error {
 	return nil
 }
 
+// sampleScale возвращает строку-разделитель заданной длины для оформления вывода в консоль.
 func sampleScale(n int) string {
 	return strings.Repeat("-", n)
 }
