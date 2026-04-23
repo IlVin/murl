@@ -1,0 +1,257 @@
+basePath: /
+definitions:
+  dto.BatchItem:
+    properties:
+      correlation_id:
+        description: |-
+          CorrelationID — произвольный идентификатор строки, предоставленный клиентом.
+          Служит для сопоставления запроса и ответа в асинхронных или пакетных операциях.
+        type: string
+      err:
+        description: Err содержит описание ошибки обработки конкретного элемента,
+          если она возникла.
+        type: string
+      original_url:
+        description: |-
+          OriginalURL — исходный длинный URL.
+          Может быть пустым в ответе, если клиент уже знает его.
+        type: string
+      short_url:
+        description: ShortURL — результат сокращения для данной строки.
+        type: string
+    type: object
+  dto.URLItem:
+    properties:
+      correlation_id:
+        description: CorrelationID — идентификатор, связывающий запись с исходным
+          запросом (если применимо).
+        type: string
+      original_url:
+        description: OriginalURL — исходный длинный URL.
+        type: string
+      short_url:
+        description: ShortURL — соответствующий короткий URL.
+        type: string
+    type: object
+  handlers.APIShortenReq:
+    properties:
+      url:
+        type: string
+    type: object
+  handlers.APIShortenResp:
+    properties:
+      result:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Сервис сокращения ссылок с поддержкой сессий, батчинга и асинхронного
+    удаления.
+  title: MicroURL Service API
+  version: "1.0"
+paths:
+  /:
+    post:
+      consumes:
+      - text/plain
+      description: Принимает длинный URL в теле запроса как строку и возвращает короткую
+        ссылку.
+      parameters:
+      - description: Оригинальный длинный URL
+        in: body
+        name: url
+        required: true
+        schema:
+          type: string
+      produces:
+      - text/plain
+      responses:
+        "201":
+          description: Короткая ссылка
+          schema:
+            type: string
+        "400":
+          description: Неверный формат запроса
+          schema:
+            type: string
+        "409":
+          description: URL уже сокращен (возвращает существующую ссылку)
+          schema:
+            type: string
+        "422":
+          description: Домен заблокирован (циклическое сокращение)
+          schema:
+            type: string
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            type: string
+      summary: Сократить URL (Text)
+      tags:
+      - URL
+  /{id}:
+    get:
+      description: Возвращает 307 статус и заголовок Location для перехода.
+      parameters:
+      - description: ID короткой ссылки
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "307":
+          description: Redirect
+          schema:
+            type: string
+        "404":
+          description: Не найдено
+          schema:
+            type: string
+        "410":
+          description: Ссылка удалена
+          schema:
+            type: string
+      summary: Переход по ссылке
+      tags:
+      - Redirect
+  /api/shorten:
+    post:
+      consumes:
+      - application/json
+      description: 'Принимает JSON {"url": "..."} и возвращает JSON {"result": "..."}.'
+      parameters:
+      - description: Запрос сокращения
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.APIShortenReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Успешное создание
+          schema:
+            $ref: '#/definitions/handlers.APIShortenResp'
+        "400":
+          description: Неверный формат JSON или URL
+          schema:
+            type: string
+        "409":
+          description: 'Конфликт: уже существует'
+          schema:
+            $ref: '#/definitions/handlers.APIShortenResp'
+        "500":
+          description: Внутренняя ошибка
+          schema:
+            type: string
+      summary: Сократить URL (JSON)
+      tags:
+      - URL API
+  /api/shorten/batch:
+    post:
+      consumes:
+      - application/json
+      description: Принимает массив объектов и возвращает массив сокращенных ссылок.
+        Поддерживает большие объемы данных.
+      parameters:
+      - description: Массив ссылок для сокращения
+        in: body
+        name: request
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/dto.BatchItem'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Массив результатов
+          schema:
+            items:
+              $ref: '#/definitions/dto.BatchItem'
+            type: array
+        "400":
+          description: Неверный формат
+          schema:
+            type: string
+      summary: Пакетное сокращение (Streaming)
+      tags:
+      - URL API
+  /api/user/urls:
+    delete:
+      consumes:
+      - application/json
+      description: Принимает список ID ссылок и асинхронно помечает их как удаленные.
+        Только для владельца.
+      parameters:
+      - description: Массив ID коротких ссылок
+        in: body
+        name: ids
+        required: true
+        schema:
+          items:
+            type: string
+          type: array
+      responses:
+        "202":
+          description: Принято к обработке
+          schema:
+            type: string
+        "401":
+          description: Не авторизован
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Удалить ссылки (Batch)
+      tags:
+      - User
+    get:
+      description: Возвращает список всех когда-либо сокращенных пользователем ссылок.
+        Требуется авторизация (Cookie или Bearer).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список ссылок
+          schema:
+            items:
+              $ref: '#/definitions/dto.URLItem'
+            type: array
+        "204":
+          description: У пользователя нет ссылок
+          schema:
+            type: string
+        "401":
+          description: Не авторизован
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Ссылки пользователя
+      tags:
+      - User
+  /ping:
+    get:
+      description: Проверка доступности соединения с хранилищем.
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "500":
+          description: DB unreachable
+          schema:
+            type: string
+      summary: Health Check
+      tags:
+      - System
+securityDefinitions:
+  ApiKeyAuth:
+    description: Тип 'Bearer <token>' или использование куки 'murl_session'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

@@ -3,6 +3,16 @@
 // вызов соответствующих методов бизнес-логики и формирование HTTP-ответов.
 package handlers
 
+// @title           MicroURL Service API
+// @version         1.0
+// @description     Сервис сокращения ссылок с поддержкой сессий, батчинга и асинхронного удаления.
+// @BasePath        /
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+// @description Тип 'Bearer <token>' или использование куки 'murl_session'
+
 import (
 	"context"
 	"encoding/json"
@@ -94,6 +104,18 @@ func ErrHandling(err error, statusOK int) (int, error) {
 
 // AddURL обрабатывает POST запросы с сырым текстом (URL) в теле.
 // Возвращает сокращенный URL в текстовом формате.
+// @Summary      Сократить URL (Text)
+// @Description  Принимает длинный URL в теле запроса как строку и возвращает короткую ссылку.
+// @Tags         URL
+// @Accept       text/plain
+// @Produce      text/plain
+// @Param        url  body      string  true  "Оригинальный длинный URL"
+// @Success      201  {string}  string  "Короткая ссылка"
+// @Success      409  {string}  string  "URL уже сокращен (возвращает существующую ссылку)"
+// @Failure      400  {string}  string  "Неверный формат запроса"
+// @Failure      422  {string}  string  "Домен заблокирован (циклическое сокращение)"
+// @Failure      500  {string}  string  "Внутренняя ошибка сервера"
+// @Router       / [post]
 func (h *Handlers) AddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -141,6 +163,15 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 // =========== GET /api/user/urls ==================
 
 // APIUserURLs возвращает список всех ссылок, принадлежащих текущему авторизованному пользователю.
+// @Summary      Ссылки пользователя
+// @Description  Возвращает список всех когда-либо сокращенных пользователем ссылок. Требуется авторизация (Cookie или Bearer).
+// @Tags         User
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Success      200  {array}   dto.URLItem  "Список ссылок"
+// @Success      204  {string}  string       "У пользователя нет ссылок"
+// @Failure      401  {string}  string       "Не авторизован"
+// @Router       /api/user/urls [get]
 func (h *Handlers) APIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := model.GetSession(r.Context(), h.keySession)
@@ -191,6 +222,15 @@ func (h *Handlers) APIUserURLs() http.HandlerFunc {
 // =========== DELETE /api/user/urls ==================
 
 // DeleteAPIUserURLs принимает массив идентификаторов ссылок в JSON для их последующего удаления.
+// @Summary      Удалить ссылки (Batch)
+// @Description  Принимает список ID ссылок и асинхронно помечает их как удаленные. Только для владельца.
+// @Tags         User
+// @Accept       json
+// @Security     ApiKeyAuth
+// @Param        ids  body  []string  true  "Массив ID коротких ссылок"
+// @Success      202  {string}  string    "Принято к обработке"
+// @Failure      401  {string}  string    "Не авторизован"
+// @Router       /api/user/urls [delete]
 func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := model.GetSession(r.Context(), h.keySession)
@@ -248,6 +288,17 @@ type APIShortenResp struct {
 
 // APIShorten обрабатывает POST запросы с JSON объектом {"url": "..."}.
 // Возвращает JSON объект {"result": "..."}.
+// @Summary      Сократить URL (JSON)
+// @Description  Принимает JSON {"url": "..."} и возвращает JSON {"result": "..."}.
+// @Tags         URL API
+// @Accept       json
+// @Produce      json
+// @Param        request body      APIShortenReq  true  "Запрос сокращения"
+// @Success      201     {object}  APIShortenResp "Успешное создание"
+// @Success      409     {object}  APIShortenResp "Конфликт: уже существует"
+// @Failure      400     {string}  string         "Неверный формат JSON или URL"
+// @Failure      500     {string}  string         "Внутренняя ошибка"
+// @Router       /api/shorten [post]
 func (h *Handlers) APIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -369,6 +420,15 @@ func (h *Handlers) writePart(ctx context.Context, part dto.Batch, w http.Respons
 // APIShortenBatch реализует потоковую (streaming) обработку больших массивов ссылок.
 // Использует jstream для чтения элементов один за другим, не загружая весь JSON в память.
 // Данные обрабатываются пачками (chunks) и сразу записываются в ResponseWriter в формате JSON-массива.
+// @Summary      Пакетное сокращение (Streaming)
+// @Description  Принимает массив объектов и возвращает массив сокращенных ссылок. Поддерживает большие объемы данных.
+// @Tags         URL API
+// @Accept       json
+// @Produce      json
+// @Param        request body      []dto.BatchItem  true  "Массив ссылок для сокращения"
+// @Success      201     {array}   dto.BatchItem   "Массив результатов"
+// @Failure      400     {string}  string           "Неверный формат"
+// @Router       /api/shorten/batch [post]
 func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -456,6 +516,14 @@ func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 
 // GetURL обрабатывает GET запросы и выполняет редирект (307 Temporary Redirect) на оригинальный адрес.
 // Возвращает 410 Gone, если ссылка была удалена.
+// @Summary      Переход по ссылке
+// @Description  Возвращает 307 статус и заголовок Location для перехода.
+// @Tags         Redirect
+// @Param        id  path  string  true  "ID короткой ссылки"
+// @Success      307  {string}  string  "Redirect"
+// @Failure      410  {string}  string  "Ссылка удалена"
+// @Failure      404  {string}  string  "Не найдено"
+// @Router       /{id} [get]
 func (h *Handlers) GetURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, err := h.service.GetURL(r.Context(), r.URL.String())
@@ -473,6 +541,12 @@ func (h *Handlers) GetURL() http.HandlerFunc {
 // =========== GET /ping ==================
 
 // Ping проверяет доступность базы данных.
+// @Summary      Health Check
+// @Description  Проверка доступности соединения с хранилищем.
+// @Tags         System
+// @Success      200  {string}  string  "OK"
+// @Failure      500  {string}  string  "DB unreachable"
+// @Router       /ping [get]
 func (h *Handlers) Ping() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := h.service.Ping(r.Context())
