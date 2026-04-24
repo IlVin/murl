@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 
 	pgconn "github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -329,4 +330,317 @@ func TestCQRSConnector_PickLiveReplica(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "success_from_r2", res.Val)
 	})
+}
+
+// TestCQRSConnector_NoRetryAfterFirstRow тестирует критическое правило:
+// Если хотя бы одна строка уже передана через yield, ретрай НЕ ДОЛЖЕН выполняться,
+// даже если ошибка повторимая.
+func TestCQRSConnector_NoRetryAfterFirstRow(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+	replica.EXPECT().WithTracerProvider(gomock.Any()).Return(replica).AnyTimes()
+
+	db := NewCQRSConnector(master, replica).WithTracerProvider(tp)
+
+	type res struct{ ID int }
+	q := NewQuery[res]("SELECT id FROM users", func(r *res) []any {
+		return []any{&r.ID}
+	}).AsRead()
+
+	// Сценарий: реплика отдала первую строку, а затем сломалась
+	replicaSeq := func(yield func(any, error) bool) {
+		// Отдаём первую строку успешно
+		if !yield(&res{ID: 1}, nil) {
+			return
+		}
+		// Затем отдаём ошибку сети (повторимую)
+		netErr := mockNetError{error: errors.New("connection lost after first row")}
+		yield(nil, netErr)
+	}
+
+	replica.EXPECT().IsOnline().Return(true).AnyTimes()
+	replica.EXPECT().Fetch(gomock.Any(), q, gomock.Any()).Return(replicaSeq)
+
+	// Мастер НЕ ДОЛЖЕН вызываться, потому что ретрай после первой строки запрещён
+	master.EXPECT().Fetch(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+	var results []int
+	var lastErr error
+
+	for val, err := range db.Fetch(ctx, q) {
+		if err != nil {
+			lastErr = err
+			break
+		}
+		if val != nil {
+			results = append(results, val.(*res).ID)
+		}
+	}
+
+	// Должна быть получена первая строка
+	assert.Equal(t, []int{1}, results, "Должна быть получена первая строка")
+	// Должна быть ошибка (реплика сломалась после первой строки)
+	assert.Error(t, lastErr, "Должна быть ошибка после первой строки")
+	assert.Contains(t, lastErr.Error(), "connection lost", "Ошибка должна быть исходной сетевой")
+}
+
+// TestCQRSConnector_RetryOnlyBeforeFirstRow тестирует, что ретрай происходит ТОЛЬКО
+// если ошибка случилась ДО передачи первой строки.
+func TestCQRSConnector_RetryOnlyBeforeFirstRow(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+	replica.EXPECT().WithTracerProvider(gomock.Any()).Return(replica).AnyTimes()
+
+	db := NewCQRSConnector(master, replica).WithTracerProvider(tp)
+
+	type res struct{ ID int }
+	q := NewQuery[res]("SELECT id FROM users", func(r *res) []any {
+		return []any{&r.ID}
+	}).AsRead()
+
+	// Сценарий: реплика сразу возвращает сетевую ошибку (повторимую)
+	replicaSeq := func(yield func(any, error) bool) {
+		netErr := mockNetError{error: errors.New("network timeout")}
+		yield(nil, netErr)
+	}
+
+	// Мастер успешно возвращает данные
+	masterSeq := func(yield func(any, error) bool) {
+		yield(&res{ID: 42}, nil)
+	}
+
+	replica.EXPECT().IsOnline().Return(true).AnyTimes()
+	replica.EXPECT().Fetch(gomock.Any(), q, gomock.Any()).Return(replicaSeq)
+	master.EXPECT().IsOnline().Return(true).AnyTimes()
+	master.EXPECT().Fetch(gomock.Any(), q, gomock.Any()).Return(masterSeq)
+
+	var results []int
+	for val, err := range db.Fetch(ctx, q) {
+		if err != nil {
+			t.Fatalf("Не ожидалась ошибка, получена: %v", err)
+		}
+		if val != nil {
+			results = append(results, val.(*res).ID)
+		}
+	}
+
+	// Должны получить данные от мастера
+	assert.Equal(t, []int{42}, results, "Ретрай должен переключиться на мастера")
+}
+
+// TestCQRSConnector_FetchRowRetryStrategy тестирует стратегию ретраев для FetchRow
+// (здесь ретрай всегда безопасен, так как нет частичных результатов).
+func TestCQRSConnector_FetchRowRetryStrategy(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica1 := NewMockPgInstance(ctrl)
+	replica2 := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+	replica1.EXPECT().WithTracerProvider(gomock.Any()).Return(replica1).AnyTimes()
+	replica2.EXPECT().WithTracerProvider(gomock.Any()).Return(replica2).AnyTimes()
+
+	db := NewCQRSConnector(master, replica1, replica2).WithTracerProvider(tp)
+
+	type res struct{ ID int }
+	q := NewQuery[res]("SELECT id FROM users", func(r *res) []any {
+		return []any{&r.ID}
+	}).AsRead()
+
+	t.Run("retry through all replicas then master", func(t *testing.T) {
+		netErr := mockNetError{error: errors.New("connection refused")}
+
+		replica1.EXPECT().IsOnline().Return(true).AnyTimes()
+		replica1.EXPECT().FetchRow(gomock.Any(), q, gomock.Any()).Return(nil, netErr)
+
+		replica2.EXPECT().IsOnline().Return(true).AnyTimes()
+		replica2.EXPECT().FetchRow(gomock.Any(), q, gomock.Any()).Return(nil, netErr)
+
+		master.EXPECT().IsOnline().Return(true).AnyTimes()
+		master.EXPECT().FetchRow(gomock.Any(), q, gomock.Any()).Return(&res{ID: 99}, nil)
+
+		res, err := FetchRow(ctx, db, q)
+		assert.NoError(t, err)
+		assert.Equal(t, 99, res.ID)
+	})
+
+	t.Run("non-retryable error stops immediately", func(t *testing.T) {
+		syntaxErr := &pgconn.PgError{Code: "42601", Message: "syntax error"}
+
+		replica1.EXPECT().IsOnline().Return(true).AnyTimes()
+		replica1.EXPECT().FetchRow(gomock.Any(), q, gomock.Any()).Return(nil, syntaxErr)
+
+		// Реплика 2 и мастер НЕ ДОЛЖНЫ вызываться
+		replica2.EXPECT().FetchRow(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+		master.EXPECT().FetchRow(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+		_, err := FetchRow(ctx, db, q)
+		assert.Error(t, err)
+		var pgErr *pgconn.PgError
+		assert.ErrorAs(t, err, &pgErr)
+		assert.Equal(t, "42601", pgErr.Code)
+	})
+}
+
+// TestCQRSConnector_ContextCancellationDuringBackoff тестирует, что бэкофф
+// правильно реагирует на отмену контекста.
+func TestCQRSConnector_ContextCancellationDuringBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+
+	db := NewCQRSConnector(master).WithTracerProvider(tp)
+
+	type res struct{ ID int }
+	q := NewQuery[res]("SELECT id FROM users", func(r *res) []any {
+		return []any{&r.ID}
+	}).AsWrite() // Write-запрос, чтобы включился бэкофф
+
+	retryableErr := &pgconn.PgError{Code: "57P01"} // Admin shutdown
+
+	// Первая попытка — ошибка
+	master.EXPECT().Exec(gomock.Any(), q, gomock.Any()).Return(int64(0), retryableErr)
+
+	// Отменяем контекст во время бэкоффа
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	start := time.Now()
+	_, err := db.Exec(ctx, q)
+	elapsed := time.Since(start)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	// Бэкофф НЕ должен отработать полностью (100ms)
+	assert.Less(t, elapsed, 100*time.Millisecond, "Бэкофф должен прерваться по отмене контекста")
+}
+
+// TestCQRSConnector_WriteOnlyMasterNoReplicas тестирует, что write-операции
+// никогда не пытаются обратиться к репликам, даже если реплики есть.
+func TestCQRSConnector_WriteOnlyMasterNoReplicas(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+	replica.EXPECT().WithTracerProvider(gomock.Any()).Return(replica).AnyTimes()
+
+	db := NewCQRSConnector(master, replica).WithTracerProvider(tp)
+
+	q := NewCommand("UPDATE users SET active = true").AsWrite()
+
+	// Реплика не должна вызываться даже для IsOnline
+	replica.EXPECT().IsOnline().Times(0)
+	replica.EXPECT().Exec(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+	// Мастер вызывается (может быть с ретраем)
+	master.EXPECT().IsOnline().AnyTimes()
+	master.EXPECT().Exec(gomock.Any(), q, gomock.Any()).Return(int64(5), nil).Times(1)
+
+	affected, err := Exec(ctx, db, q)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), affected)
+}
+
+// TestCQRSConnector_GetNodeOrder проверяет правильность порядка узлов для разных сценариев.
+func TestCQRSConnector_GetNodeOrder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica1 := NewMockPgInstance(ctrl)
+	replica2 := NewMockPgInstance(ctrl)
+	replica3 := NewMockPgInstance(ctrl)
+
+	// Настройка IsOnline: r1 и r3 онлайн, r2 оффлайн
+	replica1.EXPECT().IsOnline().Return(true).AnyTimes()
+	replica2.EXPECT().IsOnline().Return(false).AnyTimes()
+	replica3.EXPECT().IsOnline().Return(true).AnyTimes()
+
+	conn := &cqrsConnector{
+		master:   master,
+		replicas: []PgInstance{replica1, replica2, replica3},
+	}
+
+	t.Run("Write operation: only master twice", func(t *testing.T) {
+		nodes := conn.getNodeOrder(false)
+		assert.Len(t, nodes, 2)
+		assert.Equal(t, master, nodes[0])
+		assert.Equal(t, master, nodes[1])
+	})
+
+	t.Run("Read operation: online replicas + master", func(t *testing.T) {
+		nodes := conn.getNodeOrder(true)
+		// Должны быть только живые реплики (r1, r3) + мастер
+		assert.Len(t, nodes, 3)
+		assert.Equal(t, replica1, nodes[0])
+		assert.Equal(t, replica3, nodes[1])
+		assert.Equal(t, master, nodes[2])
+	})
+}
+
+// BenchmarkCQRSConnector_Fetch измеряет производительность Fetch с ретраями.
+func BenchmarkCQRSConnector_Fetch(b *testing.B) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(b)
+	defer ctrl.Finish()
+
+	master := NewMockPgInstance(ctrl)
+	replica := NewMockPgInstance(ctrl)
+
+	tp := traceNoop.NewTracerProvider()
+	master.EXPECT().WithTracerProvider(gomock.Any()).Return(master).AnyTimes()
+	replica.EXPECT().WithTracerProvider(gomock.Any()).Return(replica).AnyTimes()
+
+	db := NewCQRSConnector(master, replica).WithTracerProvider(tp)
+
+	type res struct{ ID int }
+	q := NewQuery[res]("SELECT id FROM users", func(r *res) []any {
+		return []any{&r.ID}
+	}).AsRead()
+
+	// Эмулируем успешный итератор
+	mockSeq := func(yield func(any, error) bool) {
+		for i := 0; i < 100; i++ {
+			if !yield(&res{ID: i}, nil) {
+				return
+			}
+		}
+	}
+
+	replica.EXPECT().IsOnline().Return(true).AnyTimes()
+	replica.EXPECT().Fetch(gomock.Any(), q, gomock.Any()).Return(mockSeq).AnyTimes()
+	master.EXPECT().Fetch(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for range db.Fetch(ctx, q) {
+			// Просто потребляем
+		}
+	}
 }
