@@ -57,7 +57,8 @@ escape:
 ## Lint: Проверка качества кода (требует golangci-lint)
 lint:
 	@echo "Running linter..."
-	./bin/golangci-lint run
+	${HOME}/go/bin/golangci-lint run
+	go run ./cmd/linter/ ./...
 
 ## Clean: Удаление временных файлов и бинарников
 clean:
