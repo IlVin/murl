@@ -45,7 +45,7 @@ LIMIT 1
 	func(u *UpSertResult) []any {
 		return []any{&u.Idx, &u.Cf}
 	},
-).AsRead()
+).AsWrite()
 
 // sqlSet — команда для принудительной вставки или обновления пары ID <-> URL.
 var sqlSet = pgc.NewCommand(`

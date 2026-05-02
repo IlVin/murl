@@ -194,9 +194,6 @@ func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID stri
 		batch.Batch[i].ShortURL = sPath
 	}
 
-	// Ждем когда батчер отработает
-	<-batcherUpSert.Results()
-
 	return batch, nil
 }
 
