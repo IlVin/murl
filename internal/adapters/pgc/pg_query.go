@@ -47,10 +47,6 @@ func (q *Query[T]) Binder(target any) []any {
 // NewQuery создает типизированное описание запроса.
 // Использует рефлексию один раз при инициализации для определения имени типа и места вызова.
 func NewQuery[T any](sql string, binder Binder[T]) *Query[T] {
-	if sql == "" {
-		panic("pgc: sql query cannot be empty")
-	}
-
 	typ := reflect.TypeFor[T]()
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()

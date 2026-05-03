@@ -79,10 +79,7 @@ func run() error {
 	// Ручки HTTP протокола
 	router, err := handlers.NewRouter(cfg, h)
 	if err != nil {
-		slog.Error("create router fail",
-			slog.Any("err", err),
-		)
-		os.Exit(1)
+		return err
 	}
 
 	// Запуск HTTP сервера

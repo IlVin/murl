@@ -14,6 +14,7 @@ build:
 	@echo "Building binary..."
 	go generate ./...
 	CGO_ENABLED=0 GOOS=linux go build -o $(BINARY_NAME) $(MAIN_PATH)
+	cd ./cmd/linter && CGO_ENABLED=0 GOOS=linux go build -o ../../bin/murlinter
 
 ## Docker-build: Сборка образа на базе пустого scratch
 docker-build: build

@@ -323,9 +323,11 @@ func (p *pgConnector) execInternal(ctx context.Context, q PgQuery, op string, fn
 					slog.String("stack", string(debug.Stack())),
 				)
 
-				span.RecordError(fmt.Errorf("panic: %v", r))
-				span.SetStatus(codes.Error, "panic")
-				panic(r)
+				if span != nil {
+					span.RecordError(fmt.Errorf("panic: %v", r))
+					span.SetStatus(codes.Error, "panic")
+					span.End()
+				}
 			}
 		}()
 
