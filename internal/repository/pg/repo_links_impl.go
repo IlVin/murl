@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"murl/internal/adapters/pgc"
 	"murl/internal/dto"
 	"murl/internal/model"
@@ -142,7 +143,13 @@ func (s *PgRepoLinks) BatchUpSert(ctx context.Context, batch dto.Batch) dto.Batc
 
 	// Запихиваем в батчер запросы в параллельной горутине
 	go func() {
-		defer batcherUpSert.Close()
+		defer func() {
+			if err := batcherUpSert.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		for i := range batch.Batch {
 			// Запихиваем запрос в batch
@@ -197,7 +204,13 @@ func (s *PgRepoLinks) BatchSet(ctx context.Context, batch dto.Batch) dto.Batch {
 	batcherSet := pgc.NewPgBatcher[int](ctx, s.inst, sqlSet)
 
 	go func() {
-		defer batcherSet.Close()
+		defer func() {
+			if err := batcherSet.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		for i := range batch.Batch {
 			_, idx, err := model.ParseShortPath(batch.Batch[i].ShortURL)

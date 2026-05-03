@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,7 +36,13 @@ func TestPgBatcher_CommandMode(t *testing.T) {
 		batcher := NewPgBatcher[string](ctx, mockPg, cmd)
 
 		go func() {
-			defer batcher.Close()
+			defer func() {
+				if err := batcher.Close(); err != nil {
+					slog.Error("batcher close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 			batcher.Requests() <- BatchEntry[string]{Args: []any{}, Ctx: "task-1"}
 			batcher.Requests() <- BatchEntry[string]{Args: []any{}, Ctx: "task-2"}
 		}()
@@ -62,7 +69,13 @@ func TestPgBatcher_CommandMode(t *testing.T) {
 		batcher := NewPgBatcher[string](ctx, mockPg, cmd)
 
 		go func() {
-			defer batcher.Close()
+			defer func() {
+				if err := batcher.Close(); err != nil {
+					slog.Error("batcher close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 			batcher.Requests() <- BatchEntry[string]{Args: []any{}, Ctx: "task-1"}
 			batcher.Requests() <- BatchEntry[string]{Args: []any{}, Ctx: "task-2"}
 		}()

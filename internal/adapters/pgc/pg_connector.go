@@ -256,7 +256,13 @@ func (p *pgConnector) SendBatch(ctx context.Context, q PgQuery, args [][]any) it
 			}
 
 			br := p.pool.SendBatch(pCtx, batch)
-			defer br.Close()
+			defer func() {
+				if err := br.Close(); err != nil {
+					slog.Error("batcher close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 
 			for i := 0; i < len(args); i++ {
 				// Анонимная функция для гарантированного закрытия rows
@@ -349,7 +355,11 @@ func (p *pgConnector) RunMigrations(ctx context.Context) error {
 	}
 	db := stdlib.OpenDBFromPool(realPool)
 	goose.SetBaseFS(migrations.MigrationsDir)
-	goose.SetDialect("postgres")
+	if err := goose.SetDialect("postgres"); err != nil {
+		slog.Error("goose SetDialect fail",
+			slog.Any("err", err),
+		)
+	}
 	return goose.UpContext(ctx, db, ".")
 }
 

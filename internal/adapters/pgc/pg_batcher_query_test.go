@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,19 +66,23 @@ func TestPgBatcher_DataLossDemo(t *testing.T) {
 		Times(expectedCalls)
 
 	go func() {
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		for i := 1; i <= numRequests; i++ {
 			batcher.Requests() <- BatchEntry[int]{
 				Args: []any{i, fmt.Sprintf("User%d", i)},
 				Ctx:  i,
 			}
 		}
-		batcher.Close()
 	}()
 
-	results := make([]BatchResult[User, int], 0)
-	for res := range batcher.Results() {
+	for range batcher.Results() {
 		totalReceived.Add(1)
-		results = append(results, res)
 	}
 
 	t.Logf("РЕЗУЛЬТАТЫ ТЕСТА")
@@ -137,13 +142,19 @@ func TestPgBatcher_SlowConsumerNoDataLoss(t *testing.T) {
 		Times(expectedCalls)
 
 	go func() {
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		for i := 1; i <= numRequests; i++ {
 			batcher.Requests() <- BatchEntry[int]{
 				Args: []any{i, fmt.Sprintf("User%d", i)},
 				Ctx:  i,
 			}
 		}
-		batcher.Close()
 	}()
 
 	results := make([]BatchResult[User, int], 0)
@@ -220,13 +231,19 @@ func TestPgBatcher_MultipleBatchesNoDataLoss(t *testing.T) {
 		Times(expectedCalls)
 
 	go func() {
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		for i := 1; i <= numRequests; i++ {
 			batcher.Requests() <- BatchEntry[int]{
 				Args: []any{i},
 				Ctx:  i,
 			}
 		}
-		batcher.Close()
 	}()
 
 	received := make(map[int]int)

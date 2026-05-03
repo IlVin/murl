@@ -2,6 +2,7 @@ package wal
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,9 +93,17 @@ func TestLoadWAL_ContextCancel(t *testing.T) {
 	ev, _ := event.MakeEvent(p, nil)
 	data, _ := ev.Serialize()
 	for range 100 {
-		fh.Write(append(data, '\n'))
+		if _, err := fh.Write(append(data, '\n')); err != nil {
+			slog.Error("file write fail",
+				slog.Any("err", err),
+			)
+		}
 	}
-	fh.Close()
+	if err := fh.Close(); err != nil {
+		slog.Error("file close fail",
+			slog.Any("err", err),
+		)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := LoadWAL(ctx, walPath)

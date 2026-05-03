@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"murl/internal/adapters/pgc"
 	"murl/internal/dto"
 	"murl/internal/model"
@@ -138,7 +139,13 @@ func (s *PgRepoLinksBySessionID) BatchDelBySessionID(ctx context.Context, sessio
 
 	// Запихиваем в батчер запросы в параллельной горутине
 	go func() {
-		defer batcherDelBySessionID.Close()
+		defer func() {
+			if err := batcherDelBySessionID.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		for i := range batch.ShortURLs {
 			shortURL := batch.ShortURLs[i]
@@ -168,7 +175,13 @@ func (s *PgRepoLinksBySessionID) BatchUpSert(ctx context.Context, sessionID stri
 	batcherUpSert := pgc.NewPgBatcher[int](ctx, s.inst, sqlUpSertBySessionID)
 	// Запихиваем в батчер запросы в параллельной горутине
 	go func() {
-		defer batcherUpSert.Close()
+		defer func() {
+			if err := batcherUpSert.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		for i := range batch.Batch {
 			batcherUpSert.Requests() <- pgc.BatchEntry[int]{
@@ -206,7 +219,13 @@ func (s *PgRepoLinksBySessionID) BatchSet(ctx context.Context, sessionID string,
 	batcherSet := pgc.NewPgBatcher[int](ctx, s.inst, sqlSetBySessionID)
 	// Запихиваем в батчер запросы в параллельной горутине
 	go func() {
-		defer batcherSet.Close()
+		defer func() {
+			if err := batcherSet.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		for i := range batch.Batch {
 			_, idx, err := model.ParseShortPath(batch.Batch[i].ShortURL)

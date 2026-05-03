@@ -61,7 +61,7 @@ var ctxMetricsKey = metricsKey{}
 // 2. Логирует URI, метод, статус-код и Content-Type ответа.
 // 3. Собирает информацию о размере переданных данных (включая сжатие).
 // 4. Интегрируется со стандартным логгером slog.
-func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
+func WithLogging(cfg LoggingConfig) (func(h http.Handler) http.Handler, error) {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// функция Now() возвращает текущее время
@@ -92,5 +92,5 @@ func WithLogging(cfg LoggingConfig) func(h http.Handler) http.Handler {
 			)
 
 		})
-	}
+	}, nil
 }

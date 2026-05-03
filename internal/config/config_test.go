@@ -32,8 +32,14 @@ func TestNewConfig(t *testing.T) {
 		// Создаем временные файлы
 		_ = os.WriteFile("/tmp/events.log", []byte(""), 0666)
 		_ = os.WriteFile("/tmp/audit.log", []byte(""), 0666)
-		defer os.Remove("/tmp/events.log")
-		defer os.Remove("/tmp/audit.log")
+		defer func() {
+			err := os.Remove("/tmp/events.log")
+			assert.NoError(t, err)
+		}()
+		defer func() {
+			err := os.Remove("/tmp/audit.log")
+			assert.NoError(t, err)
+		}()
 
 		cfg, err := NewConfig(&args, nil)
 		require.NoError(t, err)

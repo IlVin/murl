@@ -230,7 +230,7 @@ func (w *readCloserWrapper) Close() error {
 // 3. Использование sync.Pool для Brotli, Gzip и Deflate (существенно снижает аллокации).
 // 4. Учет весов приоритетов (;q=0.8) при выборе алгоритма сжатия.
 // 5. Интеграция с Middleware логирования через передачу метрик в контексте.
-func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
+func WithCompress(cfg CompressConfig) (func(h http.Handler) http.Handler, error) {
 	compressibleContentTypes := cfg.CompressibleContentTypes()
 
 	return func(h http.Handler) http.Handler {
@@ -311,8 +311,14 @@ func WithCompress(cfg CompressConfig) func(h http.Handler) http.Handler {
 			}
 
 			cw := NewCompressResponseWriter(w, r, compressibleContentTypes, wPools)
-			defer cw.Close()
+			defer func() {
+				if err := cw.Close(); err != nil {
+					slog.Error("compress response writer close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 			h.ServeHTTP(cw, r)
 		})
-	}
+	}, nil
 }

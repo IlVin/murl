@@ -32,11 +32,17 @@ func TestWithLogging(t *testing.T) {
 
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(content))
+			if _, err := w.Write([]byte(content)); err != nil {
+				slog.Error("write content fail",
+					slog.Any("err", err),
+				)
+			}
 		})
 
 		// Оборачиваем
-		middleware := WithLogging(mockCfg{})
+		middleware, err := WithLogging(mockCfg{})
+		assert.NoError(t, err)
+
 		handler := middleware(nextHandler)
 
 		req := httptest.NewRequest(http.MethodGet, "/test-url", nil)
@@ -64,7 +70,10 @@ func TestWithLogging(t *testing.T) {
 		// Хендлер, который ничего не вызывает (по умолчанию 200 OK)
 		nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 
-		handler := WithLogging(mockCfg{})(nextHandler)
+		mw, err := WithLogging(mockCfg{})
+		assert.NoError(t, err)
+		handler := mw(nextHandler)
+
 		req := httptest.NewRequest(http.MethodPost, "/default", nil)
 		rec := httptest.NewRecorder()
 

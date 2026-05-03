@@ -95,7 +95,11 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 // Close корректно завершает работу всех компонентов репозитория.
 func (r *repo) Close(ctx context.Context) error {
 	if r.wal != nil {
-		r.wal.Close()
+		if err := r.wal.Close(); err != nil {
+			slog.Error("wal close fail",
+				slog.Any("err", err),
+			)
+		}
 	}
 
 	if r.pgInst == nil {

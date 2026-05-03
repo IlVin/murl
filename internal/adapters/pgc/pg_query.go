@@ -52,7 +52,7 @@ func NewQuery[T any](sql string, binder Binder[T]) *Query[T] {
 	}
 
 	typ := reflect.TypeFor[T]()
-	for typ.Kind() == reflect.Ptr {
+	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
 	typeName := typ.Name()

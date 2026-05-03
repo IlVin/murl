@@ -27,14 +27,17 @@ func TestWithSession_Integration(t *testing.T) {
 	// 2. Хендлер-заглушка для проверки контекста
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s, ok := model.GetSession(r.Context(), keySession)
-		if ok && !(s.ID.String() == "") {
+		if ok && s.ID.String() != "" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 	// Инициализируем миддлварь (теперь передаем конфиг)
-	mw := WithSession(mockCfg)(nextHandler)
+	mwSession, err := WithSession(mockCfg)
+	assert.NoError(t, err)
+	mw := mwSession(nextHandler)
+
 	t.Run("New guest session (No Cookie)", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		w := httptest.NewRecorder()

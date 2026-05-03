@@ -2,6 +2,7 @@ package audit
 
 import (
 	"fmt"
+	"log/slog"
 	"murl/internal/domain"
 	"os"
 	"path/filepath"
@@ -32,7 +33,13 @@ func TestFileAuditlog_Update(t *testing.T) {
 	// Создаем временную директорию для изоляции тестов
 	tmpDir, err := os.MkdirTemp("", "auditlog_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			slog.Error("remove tmp dir fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "test_audit.log")
 	adapter := NewFileAuditlog("test-worker", logPath)
@@ -73,8 +80,10 @@ func TestFileAuditlog_Update(t *testing.T) {
 	t.Run("error: write to closed file (internal writeBytes test)", func(t *testing.T) {
 		// Создаем файл, открываем его и сразу закрываем
 		f, err := os.CreateTemp(tmpDir, "closed_test")
-		require.NoError(t, err)
-		f.Close()
+		assert.NoError(t, err)
+
+		err = f.Close()
+		assert.NoError(t, err)
 
 		// Прямой вызов вспомогательной функции для проверки ветки ошибки записи
 		err = writeBytes(f, []byte("data"))
@@ -92,7 +101,10 @@ func TestFileAuditlog_Update(t *testing.T) {
 func TestFileAuditlog_FlockIntegrity(t *testing.T) {
 	// Этот тест проверяет, что блокировка не мешает последовательному выполнению
 	tmpDir, _ := os.MkdirTemp("", "flock_test")
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		err := os.RemoveAll(tmpDir)
+		assert.NoError(t, err)
+	}()
 	logPath := filepath.Join(tmpDir, "integrity.log")
 	adapter := NewFileAuditlog("worker", logPath)
 

@@ -8,6 +8,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -105,7 +106,13 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		if err != nil {
 			return fmt.Errorf("invalid path to event storage: %w", err)
 		}
-		defer fh.Close()
+		defer func() {
+			if err := fh.Close(); err != nil {
+				slog.Error("event storage file close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		cfg = cfg.SetEventStoragePath(s)
 		return nil
 	})
@@ -117,7 +124,13 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		if err != nil {
 			return fmt.Errorf("invalid path to audit file: %w", err)
 		}
-		defer fh.Close()
+		defer func() {
+			if err := fh.Close(); err != nil {
+				slog.Error("audit file close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		cfg = cfg.SetAuditFile(s)
 		return nil
 	})
@@ -162,7 +175,13 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			if err != nil {
 				return cfg, fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
 			}
-			defer fh.Close()
+			defer func() {
+				if err := fh.Close(); err != nil {
+					slog.Error("evant storage file close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 			cfg = cfg.SetEventStoragePath(s)
 		}
 	}
@@ -172,7 +191,13 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			if err != nil {
 				return cfg, fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
 			}
-			defer fh.Close()
+			defer func() {
+				if err := fh.Close(); err != nil {
+					slog.Error("audit file close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
 			cfg = cfg.SetAuditFile(s)
 		}
 	}

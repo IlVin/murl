@@ -165,7 +165,7 @@ func postURL(client *http.Client, longURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
 		return "", fmt.Errorf("post status: %d", resp.StatusCode)
@@ -185,7 +185,7 @@ func verifyURL(client *http.Client, shortURL, originalURL string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 410 Gone - норма для удаленных асинхронно ссылок
 	if resp.StatusCode == http.StatusGone {
@@ -219,7 +219,7 @@ func postBatch(client *http.Client, count int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("batch status: %d", resp.StatusCode)
@@ -243,7 +243,7 @@ func getUserURLs(client *http.Client) ([]UserURL, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("user urls status: %d", resp.StatusCode)
@@ -265,7 +265,7 @@ func deleteURLs(client *http.Client, ids []string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return nil
 }
 

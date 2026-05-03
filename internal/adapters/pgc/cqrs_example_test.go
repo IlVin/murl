@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 )
 
 // ExampleNewCQRSConnector демонстрирует создание CQRS коннектора и его использование
@@ -58,7 +59,13 @@ func ExampleNewCQRSConnector_batcher() {
 	batcher := NewPgBatcher[int](ctx, db, insertLog)
 
 	go func() {
-		defer batcher.Close()
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("close batcher fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		batcher.Requests() <- BatchEntry[int]{Args: []any{"System event"}, Ctx: 1}
 	}()
 

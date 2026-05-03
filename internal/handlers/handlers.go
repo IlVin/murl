@@ -118,7 +118,7 @@ func ErrHandling(err error, statusOK int) (int, error) {
 // @Router       / [post]
 func (h *Handlers) AddURL() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		buf, err := readBody(r)
 		if err != nil {
@@ -244,7 +244,7 @@ func (h *Handlers) DeleteAPIUserURLs() http.HandlerFunc {
 			slog.Any("session", session),
 		)
 
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		buf, err := readBody(r)
 		if err != nil {
@@ -301,7 +301,7 @@ type APIShortenResp struct {
 // @Router       /api/shorten [post]
 func (h *Handlers) APIShorten() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 			slog.Warn("invalid Content-Type",
@@ -431,7 +431,7 @@ func (h *Handlers) writePart(ctx context.Context, part dto.Batch, w http.Respons
 // @Router       /api/shorten/batch [post]
 func (h *Handlers) APIShortenBatch() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 			slog.Warn("invalid Content-Type",

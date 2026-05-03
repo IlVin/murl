@@ -57,19 +57,22 @@ func TestNewRouter(t *testing.T) {
 
 	t.Run("create chi router", func(t *testing.T) {
 		cfg := baseCfg.SetRouterType("chi")
-		r := NewRouter(cfg, h)
+		r, err := NewRouter(cfg, h)
+		assert.NoError(t, err)
 		assert.NotNil(t, r)
 	})
 
 	t.Run("create mux router", func(t *testing.T) {
 		cfg := baseCfg.SetRouterType("mux")
-		r := NewRouter(cfg, h)
+		r, err := NewRouter(cfg, h)
+		assert.NoError(t, err)
 		assert.NotNil(t, r)
 	})
 
 	t.Run("default to mux", func(t *testing.T) {
 		cfg := baseCfg.SetRouterType("unknown")
-		r := NewRouter(cfg, h)
+		r, err := NewRouter(cfg, h)
+		assert.NoError(t, err)
 		assert.NotNil(t, r)
 	})
 }
@@ -99,6 +102,8 @@ func TestWithLoggingIntegration(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := middleware.WithLogging(cfg)(next)
+	mwLogging, err := middleware.WithLogging(cfg)
+	assert.NoError(t, err)
+	handler := mwLogging(next)
 	assert.NotNil(t, handler)
 }

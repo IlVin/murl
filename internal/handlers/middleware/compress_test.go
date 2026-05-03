@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,7 +36,9 @@ func TestWithCompress(t *testing.T) {
 		_, _ = w.Write([]byte(content))
 	})
 
-	handler := WithCompress(cfg)(nextHandler)
+	mw, err := WithCompress(cfg)
+	assert.NoError(t, err)
+	handler := mw(nextHandler)
 
 	tests := []struct {
 		name           string
@@ -92,9 +95,16 @@ func TestCompress_EdgeCases(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html")
 			w.Header().Set("Content-Encoding", "custom")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("data"))
+			if _, err := w.Write([]byte("data")); err != nil {
+				slog.Error("write data fail",
+					slog.Any("err", err),
+				)
+			}
 		})
-		handler := WithCompress(cfg)(next)
+		mw, err := WithCompress(cfg)
+		assert.NoError(t, err)
+		handler := mw(next)
+
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip")
@@ -107,9 +117,16 @@ func TestCompress_EdgeCases(t *testing.T) {
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "image/png")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("png-data"))
+			if _, err := w.Write([]byte("png-data")); err != nil {
+				slog.Error("write png-data fail",
+					slog.Any("err", err),
+				)
+			}
 		})
-		handler := WithCompress(cfg)(next)
+		mw, err := WithCompress(cfg)
+		assert.NoError(t, err)
+		handler := mw(next)
+
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip")
@@ -121,9 +138,17 @@ func TestCompress_EdgeCases(t *testing.T) {
 	t.Run("Invalid Q Weight", func(t *testing.T) {
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte("data"))
+			if _, err := w.Write([]byte("data")); err != nil {
+				slog.Error("write data fail",
+					slog.Any("err", err),
+				)
+			}
+
 		})
-		handler := WithCompress(cfg)(next)
+		mw, err := WithCompress(cfg)
+		assert.NoError(t, err)
+		handler := mw(next)
+
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Encoding", "gzip;q=invalid")
@@ -139,10 +164,17 @@ func TestCompress_Metrics(t *testing.T) {
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("some data to compress"))
+		if _, err := w.Write([]byte("some data to compress")); err != nil {
+			slog.Error("write data fail",
+				slog.Any("err", err),
+			)
+		}
+
 	})
 
-	handler := WithCompress(cfg)(next)
+	mw, err := WithCompress(cfg)
+	assert.NoError(t, err)
+	handler := mw(next)
 
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("Accept-Encoding", "gzip")

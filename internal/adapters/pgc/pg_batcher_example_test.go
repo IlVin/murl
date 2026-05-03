@@ -3,6 +3,7 @@ package pgc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -28,7 +29,13 @@ func ExamplePgBatcher_sync() {
 
 	// Пишем в батчер в отдельной горутине
 	go func() {
-		defer batcher.Close() // Закрытие канала requests инициирует завершение работы
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		names := []string{"Alice", "Bob", "Charlie"}
 		for _, name := range names {
@@ -64,7 +71,13 @@ func ExamplePgBatcher_async() {
 	batcher := NewPgBatcher[string](ctx, db, insertLog)
 
 	go func() {
-		defer batcher.Close()
+		defer func() {
+			if err := batcher.Close(); err != nil {
+				slog.Error("batcher close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 
 		batcher.Requests() <- BatchEntry[string]{Args: []any{"System boot"}}
 		batcher.Requests() <- BatchEntry[string]{Args: []any{"User login"}}

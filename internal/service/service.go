@@ -152,7 +152,7 @@ func (s *Service) AddURL(ctx context.Context, originalURL string) (string, error
 	}
 
 	// Предохранитель от циклических сокращений
-	if s.shortBaseURL.URL.Hostname() == normalizedURL.Hostname() {
+	if s.shortBaseURL.Hostname() == normalizedURL.Hostname() {
 		return "", ErrDomainIsBlocked
 	}
 

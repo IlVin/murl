@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"fmt"
+	"log/slog"
 	"murl/internal/adapters/audit"
 	"murl/internal/domain"
 	"os"
@@ -10,7 +11,13 @@ import (
 // ExampleFileAuditlog_Update демонстрирует надежную запись уведомления в файл лога.
 func ExampleFileAuditlog_Update() {
 	tempFile := "example_audit.log"
-	defer os.Remove(tempFile) // Очистка после примера
+	defer func() {
+		if err := os.Remove(tempFile); err != nil {
+			slog.Error("remove tmp file fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
 
 	// Создаем аудитор
 	auditor := audit.NewFileAuditlog("local-file-logger", tempFile)

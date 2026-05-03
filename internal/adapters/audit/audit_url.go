@@ -64,8 +64,12 @@ func (u *URLAuditlog) Update(notif domain.Notification) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	}()
 
 	switch resp.StatusCode {
 

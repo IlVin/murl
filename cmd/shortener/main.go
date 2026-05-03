@@ -61,7 +61,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize the repository object: %w", err)
 	}
-	defer repo.Close(ctx)
+	defer func() {
+		err = repo.Close(ctx)
+		if err != nil {
+			slog.Error("repo close fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
 
 	// Сервис сокращателя: Работаем со строками, удовлетворяющими формату URL
 	srv := service.NewService(ctx, cfg, repo, auditlog)
@@ -70,7 +77,13 @@ func run() error {
 	h := handlers.NewHandlers(cfg, srv)
 
 	// Ручки HTTP протокола
-	router := handlers.NewRouter(cfg, h)
+	router, err := handlers.NewRouter(cfg, h)
+	if err != nil {
+		slog.Error("create router fail",
+			slog.Any("err", err),
+		)
+		os.Exit(1)
+	}
 
 	// Запуск HTTP сервера
 	slog.Info("Starting server",

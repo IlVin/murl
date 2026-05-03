@@ -102,7 +102,13 @@ func LoadWAL(ctx context.Context, path string) (chan event.Event, error) {
 	ch := make(chan event.Event)
 
 	go func() {
-		defer fh.Close()
+		defer func() {
+			if err := fh.Close(); err != nil {
+				slog.Error("wal fale close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
 		defer close(ch)
 		r := bufio.NewReader(fh)
 

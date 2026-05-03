@@ -58,7 +58,7 @@ escape:
 lint:
 	@echo "Running linter..."
 	${HOME}/go/bin/golangci-lint run
-	go run ./cmd/linter/ ./...
+	./bin/murlinter ./...
 
 ## Clean: Удаление временных файлов и бинарников
 clean:

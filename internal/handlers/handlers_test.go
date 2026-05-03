@@ -47,7 +47,7 @@ func TestHandlers_AddURL_Success(t *testing.T) {
 	h.AddURL()(w, req)
 
 	res := w.Result()
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	assert.Equal(t, http.StatusCreated, res.StatusCode)
 	body, _ := io.ReadAll(res.Body)

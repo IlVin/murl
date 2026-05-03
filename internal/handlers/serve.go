@@ -42,7 +42,7 @@ type MicroURLHandlers interface {
 
 // NewRouter — фабрика для создания HTTP-обработчика (роутера).
 // Выбирает реализацию ("chi" или стандартный "mux") на основе переданной конфигурации.
-func NewRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
+func NewRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 	switch cfg.RouterType() {
 	case "mux":
 		return newMuxRouter(cfg, s)
@@ -54,7 +54,7 @@ func NewRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 
 // newMuxRouter настраивает стандартный http.ServeMux (доступно в Go 1.22+).
 // Реализует вложенную структуру Middleware через классическое функциональное оборачивание.
-func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
+func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 	slog.Info("Used http.ServeMux router")
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", s.APIShorten())
@@ -67,28 +67,63 @@ func newMuxRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	mux.HandleFunc("/", s.Default())
 
 	// Middlewares
-	return middleware.WithLimiter(cfg)(
-		middleware.WithSession(cfg)(
-			middleware.WithLogging(cfg)(
-				middleware.WithCompress(cfg)(
-					mux,
-				),
-			),
-		),
-	)
+	mwCompress, err := middleware.WithCompress(cfg)
+	if err != nil {
+		return nil, err
+	}
+	mws := mwCompress(mux)
+
+	mwLogging, err := middleware.WithLogging(cfg)
+	if err != nil {
+		return nil, err
+	}
+	mws = mwLogging(mws)
+
+	mwSession, err := middleware.WithSession(cfg)
+	if err != nil {
+		return nil, err
+	}
+	mws = mwSession(mws)
+
+	mwLimiter, err := middleware.WithLimiter(cfg)
+	if err != nil {
+		return nil, err
+	}
+	mws = mwLimiter(mws)
+
+	return mws, nil
 }
 
 // newChiRouter настраивает роутер на базе библиотеки chi.
 // Дополнительно подключает эндпоинты pprof для профилирования приложения.
-func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
+func newChiRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 	slog.Info("Used chi router")
 	r := chi.NewRouter()
 
 	// Middlewares
-	r.Use(middleware.WithLimiter(cfg))
-	r.Use(middleware.WithSession(cfg))
-	r.Use(middleware.WithLogging(cfg))
-	r.Use(middleware.WithCompress(cfg))
+	mwCompress, err := middleware.WithCompress(cfg)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(mwCompress)
+
+	mwLogging, err := middleware.WithLogging(cfg)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(mwLogging)
+
+	mwSession, err := middleware.WithSession(cfg)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(mwSession)
+
+	mwLimiter, err := middleware.WithLimiter(cfg)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(mwLimiter)
 
 	// Подключаем pprof
 	r.Mount("/debug/pprof", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +141,7 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) http.Handler {
 	r.NotFound(s.Default())
 	r.MethodNotAllowed(s.Default())
 
-	return r
+	return r, nil
 }
 
 // Serve выполняет запуск HTTP-сервера на указанном в конфигурации адресе.

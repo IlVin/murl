@@ -58,13 +58,12 @@ func setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
 // 3. Если токена нет или он невалиден: автоматически создает новую гостевую сессию.
 // 4. Помещает объект model.Session в контекст запроса.
 // 5. Устанавливает обновленный или новый токен в HTTP-куку.
-func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
+func WithSession(cfg SessionConfig) (func(http.Handler) http.Handler, error) {
 	keySession := cfg.KeySession()
 
 	manager, err := jwtmanager.NewJWT(cfg)
 	if err != nil {
-		// Критическая ошибка конфигурации — не даем запустить сервер
-		panic(fmt.Sprintf("jwt manager fail: %v", err))
+		return nil, fmt.Errorf("jwt manager fail: %w", err)
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -118,7 +117,7 @@ func WithSession(cfg SessionConfig) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), keySession, session)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
-	}
+	}, nil
 }
 
 // extractToken выполняет поиск JWT в запросе.

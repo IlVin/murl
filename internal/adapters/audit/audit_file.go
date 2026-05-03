@@ -2,6 +2,7 @@ package audit
 
 import (
 	"fmt"
+	"log/slog"
 	"murl/internal/domain"
 	"os"
 	"syscall"
@@ -57,14 +58,33 @@ func (f *FileAuditlog) Update(notif domain.Notification) error {
 	if err != nil {
 		return fmt.Errorf("cannot open file '%s': %w", f.auditFile, err)
 	}
-	defer fh.Close()
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("file close fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("failed to close file",
+				slog.Any("err", err),
+			)
+		}
+	}()
 
 	// Устанавливаем эксклюзивную блокировку (flock).
 	// syscall.LOCK_EX — блокируем на запись.
 	if err := syscall.Flock(int(fh.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("audit log flock failed: %w", err)
 	}
-	defer syscall.Flock(int(fh.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if err := syscall.Flock(int(fh.Fd()), syscall.LOCK_UN); err != nil {
+			slog.Error("failed to flock file",
+				slog.Any("err", err),
+			)
+		}
+	}()
 
 	if err := writeBytes(fh, notif.Message); err != nil {
 		return fmt.Errorf("audit log write failed: %w", err)
