@@ -1,7 +1,7 @@
 package main
 
 import (
-	"murlinter/analyzer"
+	"murl/cmd/linter/analyzer"
 
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
