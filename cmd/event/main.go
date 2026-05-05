@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"html/template"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,45 +36,55 @@ func main() {
 		if !strings.HasSuffix(val, ".go") {
 			continue
 		}
-
-		srcPath, dstPath, err := FilePath(val)
+		err := EvGen(val)
 		if err != nil {
-			panic(err)
-		}
-
-		// Пустой набор файлов
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, srcPath, nil, parser.ParseComments)
-		if err != nil {
-			panic(err)
-		}
-
-		pkgName := f.Name.Name
-		eventPayloads := FindEventStructs(f)
-		if len(eventPayloads) > 0 {
-			t := template.Must(template.New("list").Parse(Template))
-			data := Data{
-				Pkg:    pkgName,
-				Events: eventPayloads,
-			}
-			var buf bytes.Buffer
-			err := t.Execute(&buf, data)
-			if err != nil {
-				panic(err)
-			}
-			bufFmt, err := format.Source(buf.Bytes())
-			if err != nil {
-				panic(err)
-			}
-			err = os.WriteFile(dstPath, bufFmt, 0644)
-			if err != nil {
-				panic(err)
-			}
+			slog.Error("event generate fail",
+				slog.Any("err", err),
+			)
+			os.Exit(1)
 		}
 	}
 }
 
-// Ищем типы, перед которыми размещен тэг //go:event
+func EvGen(val string) error {
+	srcPath, dstPath, err := FilePath(val)
+	if err != nil {
+		return err
+	}
+
+	// Пустой набор файлов
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, srcPath, nil, parser.ParseComments)
+	if err != nil {
+		return err
+	}
+
+	pkgName := f.Name.Name
+	eventPayloads := FindEventStructs(f)
+	if len(eventPayloads) > 0 {
+		t := template.Must(template.New("list").Parse(Template))
+		data := Data{
+			Pkg:    pkgName,
+			Events: eventPayloads,
+		}
+		var buf bytes.Buffer
+		err := t.Execute(&buf, data)
+		if err != nil {
+			return err
+		}
+		bufFmt, err := format.Source(buf.Bytes())
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(dstPath, bufFmt, 0644)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Ищем типы, перед которыми размещен тэг //generate:reset
 func FindEventStructs(f *ast.File) []EvtType {
 	eventPayloads := []EvtType{}
 	for _, decl := range f.Decls {
@@ -83,7 +94,7 @@ func FindEventStructs(f *ast.File) []EvtType {
 				if genDecl.Doc != nil {
 					for _, comment := range genDecl.Doc.List {
 						tag_fields := strings.Fields(comment.Text)
-						if tag_fields[0] == "//go:event" {
+						if tag_fields[0] == "//generate:reset" {
 							for _, spec := range genDecl.Specs {
 								typeSpec := spec.(*ast.TypeSpec)
 								if _, ok := typeSpec.Type.(*ast.StructType); ok {

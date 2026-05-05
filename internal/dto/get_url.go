@@ -6,7 +6,8 @@ package dto
 // оригинального URL по его сокращенному идентификатору.
 // Используется в логике редиректов и для фиксации событий перехода.
 //
-//go:event
+//generate:event
+//generate:reset
 type GetURL struct {
 	// OriginalURL — исходный длинный URL, на который должен быть выполнен переход.
 	OriginalURL string `json:"original_url"`

@@ -18,7 +18,8 @@ type URLItem struct {
 // GetURLBySessionID представляет собой объект передачи данных, содержащий
 // все ссылки, принадлежащие конкретной сессии пользователя.
 //
-//go:event
+//generate:event
+//generate:reset
 type GetURLBySessionID struct {
 	// SessionID — уникальный идентификатор владельца ссылок.
 	SessionID uuid.UUID `json:"session_id,omitempty"`

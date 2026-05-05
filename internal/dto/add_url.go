@@ -9,7 +9,8 @@ package dto
 
 //go:generate go run murl/cmd/event $GOFILE
 
-//go:event
+//generate:event
+//generate:reset
 type AddURL struct {
 	// OriginalURL — исходный длинный URL, который необходимо сократить.
 	OriginalURL string `json:"original_url"`

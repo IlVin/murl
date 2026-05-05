@@ -8,7 +8,8 @@ import "github.com/google/uuid"
 // привязанной к конкретной сессии пользователя.
 // Используется для массового сокращения ссылок с сохранением авторства.
 //
-//go:event
+//generate:event
+//generate:reset
 type BatchBySessionID struct {
 	// SessionID — уникальный идентификатор сессии владельца ссылок.
 	SessionID uuid.UUID `json:"session_id"`

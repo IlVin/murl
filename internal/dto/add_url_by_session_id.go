@@ -8,7 +8,8 @@ import "github.com/google/uuid"
 // привязанную к конкретной сессии пользователя.
 // Используется в сценариях, где необходимо отслеживать авторство ссылки.
 //
-//go:event
+//generate:event
+//generate:reset
 type AddURLBySessionID struct {
 	// AddURL содержит базовую информацию о ссылке (Original URL).
 	AddURL

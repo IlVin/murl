@@ -16,6 +16,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+//go:generate go run murl/cmd/reset ./../../internal/
+
 func main() {
 
 	// Запускаем программу
