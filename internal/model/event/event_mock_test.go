@@ -111,3 +111,41 @@ func (mr *MockEventMockRecorder) Serialize() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Serialize", reflect.TypeOf((*MockEvent)(nil).Serialize))
 }
+
+// MockPayload is a mock of Payload interface.
+type MockPayload struct {
+	ctrl     *gomock.Controller
+	recorder *MockPayloadMockRecorder
+	isgomock struct{}
+}
+
+// MockPayloadMockRecorder is the mock recorder for MockPayload.
+type MockPayloadMockRecorder struct {
+	mock *MockPayload
+}
+
+// NewMockPayload creates a new mock instance.
+func NewMockPayload(ctrl *gomock.Controller) *MockPayload {
+	mock := &MockPayload{ctrl: ctrl}
+	mock.recorder = &MockPayloadMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPayload) EXPECT() *MockPayloadMockRecorder {
+	return m.recorder
+}
+
+// EventType mocks base method.
+func (m *MockPayload) EventType() dto.EvType {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EventType")
+	ret0, _ := ret[0].(dto.EvType)
+	return ret0
+}
+
+// EventType indicates an expected call of EventType.
+func (mr *MockPayloadMockRecorder) EventType() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EventType", reflect.TypeOf((*MockPayload)(nil).EventType))
+}

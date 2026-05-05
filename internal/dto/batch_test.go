@@ -9,7 +9,7 @@ import (
 func TestBatch_EventType(t *testing.T) {
 	t.Run("Check correct event type mapping", func(t *testing.T) {
 		b := Batch{}
-		assert.Equal(t, EvBatch, b.EventType(), "Batch must return EvBatch type")
+		assert.Equal(t, EvType("EvBatch"), b.EventType(), "Batch must return EvBatch type")
 	})
 
 	t.Run("Data consistency", func(t *testing.T) {

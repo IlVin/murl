@@ -31,11 +31,6 @@ type Event interface {
 // Payload определяет ограничение (constraint) для типов, которые могут быть упакованы в событие.
 // Сюда должны входить все DTO, реализующие метод EventType().
 type Payload interface {
-	dto.AddURL | dto.AddURLBySessionID |
-		dto.GetURL | dto.GetURLBySessionID |
-		dto.Batch | dto.BatchBySessionID |
-		dto.DeleteURLBySessionID
-
 	EventType() dto.EvType
 }
 
@@ -43,12 +38,12 @@ type Payload interface {
 // Принимает полезную нагрузку и опциональное родительское событие для построения цепочки.
 // Автоматически генерирует новый UUID для события и наследует историю родителей.
 func MakeEvent[T Payload](payload T, parentEvent Event) (Event, error) {
+	evType := payload.EventType()
+
 	pData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("cannot serialize: %w", err)
 	}
-
-	evType := any(payload).(interface{ EventType() dto.EvType }).EventType()
 
 	e := &baseEvent{
 		evID:      uuid.New(),
@@ -68,11 +63,8 @@ func MakeEvent[T Payload](payload T, parentEvent Event) (Event, error) {
 func GetPayload[T Payload](e Event) (T, error) {
 	var dest T
 
-	// Аналогично достаем тип для проверки
-	targetType := any(dest).(interface{ EventType() dto.EvType }).EventType()
-
-	if e.GetType() != targetType {
-		return dest, fmt.Errorf("type mismatch: event has %v, target is %v", e.GetType(), targetType)
+	if e.GetType() != dest.EventType() {
+		return dest, fmt.Errorf("type mismatch: event has %v, target is %v", e.GetType(), dest.EventType())
 	}
 
 	if err := json.Unmarshal(e.RawPayload(), &dest); err != nil {
@@ -116,13 +108,21 @@ func (e *baseEvent) GetID() uuid.UUID { return e.evID }
 // GetType возвращает константный тип события из пакета dto. Реализует интерфейс Event.
 func (e *baseEvent) GetType() dto.EvType { return e.evType }
 
-// RawPayload возвращает полезную нагрузку события в формате JSON (байты). Реализует интерфейс Event.
-func (e *baseEvent) RawPayload() []byte { return e.evPayload }
+// RawPayload возвращает копию полезной нагрузки для обеспечения иммутабельности.
+func (e *baseEvent) RawPayload() []byte {
+	if e.evPayload == nil {
+		return nil
+	}
+	return append([]byte(nil), e.evPayload...)
+}
 
 // GetParents возвращает срез идентификаторов всех родительских событий.
 // Метод выполняет копирование данных (append в nil), чтобы гарантировать иммутабельность
 // внутреннего состояния события при изменении среза вызывающей стороной.
 func (e *baseEvent) GetParents() []uuid.UUID {
+	if e.evParentID == nil {
+		return nil
+	}
 	return append([]uuid.UUID(nil), e.evParentID...)
 }
 

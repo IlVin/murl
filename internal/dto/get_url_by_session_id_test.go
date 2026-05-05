@@ -10,7 +10,7 @@ import (
 func TestGetURLBySessionID(t *testing.T) {
 	t.Run("Check event type", func(t *testing.T) {
 		d := GetURLBySessionID{}
-		assert.Equal(t, EvGetURLBySessionID, d.EventType())
+		assert.Equal(t, EvType("EvGetURLBySessionID"), d.EventType())
 	})
 
 	t.Run("Data integrity and JSON tags", func(t *testing.T) {

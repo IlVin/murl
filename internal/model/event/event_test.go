@@ -21,7 +21,7 @@ func TestMakeAndGetPayload(t *testing.T) {
 	ev, err := MakeEvent(payload, nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, ev.GetID())
-	assert.Equal(t, dto.EvAddURL, ev.GetType())
+	assert.Equal(t, dto.EvType("EvAddURL"), ev.GetType())
 
 	// 2. Тестируем извлечение Payload (Generic)
 	extracted, err := GetPayload[dto.AddURL](ev)

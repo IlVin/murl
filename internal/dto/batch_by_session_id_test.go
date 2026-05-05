@@ -10,7 +10,7 @@ import (
 func TestBatchBySessionID(t *testing.T) {
 	t.Run("Check event type mapping", func(t *testing.T) {
 		d := BatchBySessionID{}
-		assert.Equal(t, EvBatchBySessionID, d.EventType())
+		assert.Equal(t, EvType("EvBatchBySessionID"), d.EventType())
 	})
 
 	t.Run("Structure integrity", func(t *testing.T) {

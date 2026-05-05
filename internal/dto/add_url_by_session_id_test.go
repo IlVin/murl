@@ -10,7 +10,7 @@ import (
 func TestAddURLBySessionID_EventType(t *testing.T) {
 	t.Run("Check event type", func(t *testing.T) {
 		dto := AddURLBySessionID{}
-		assert.Equal(t, EvAddURLBySessionID, dto.EventType())
+		assert.Equal(t, EvType("EvAddURLBySessionID"), dto.EventType())
 	})
 
 	t.Run("Data integrity", func(t *testing.T) {

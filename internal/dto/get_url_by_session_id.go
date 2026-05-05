@@ -13,15 +13,15 @@ type URLItem struct {
 	ShortURL string `json:"short_url,omitempty"`
 }
 
+//go:generate go run murl/cmd/event $GOFILE
+
 // GetURLBySessionID представляет собой объект передачи данных, содержащий
 // все ссылки, принадлежащие конкретной сессии пользователя.
+//
+//go:event
 type GetURLBySessionID struct {
 	// SessionID — уникальный идентификатор владельца ссылок.
 	SessionID uuid.UUID `json:"session_id,omitempty"`
 	// Result — список найденных ссылок.
 	Result []URLItem `json:"result,omitempty"`
 }
-
-// EventType возвращает тип события EvGetURLBySessionID.
-// Используется для аудита запросов пользователей к своей истории ссылок.
-func (GetURLBySessionID) EventType() EvType { return EvGetURLBySessionID }

@@ -1,8 +1,12 @@
 package dto
 
+//go:generate go run murl/cmd/event $GOFILE
+
 // GetURL представляет собой объект передачи данных, используемый при запросе
 // оригинального URL по его сокращенному идентификатору.
 // Используется в логике редиректов и для фиксации событий перехода.
+//
+//go:event
 type GetURL struct {
 	// OriginalURL — исходный длинный URL, на который должен быть выполнен переход.
 	OriginalURL string `json:"original_url"`
@@ -12,7 +16,3 @@ type GetURL struct {
 	// Если true, оригинальный URL может быть пуст или не должен использоваться.
 	IsGone bool `json:"is_gone,omitempty"`
 }
-
-// EventType возвращает тип события EvGetURL.
-// Позволяет системе аудита фиксировать факты использования коротких ссылок.
-func (GetURL) EventType() EvType { return EvGetURL }

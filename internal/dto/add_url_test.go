@@ -9,7 +9,7 @@ import (
 func TestAddURL_EventType(t *testing.T) {
 	t.Run("Check correct event type mapping", func(t *testing.T) {
 		d := AddURL{}
-		assert.Equal(t, EvAddURL, d.EventType(), "AddURL must return EvAddURL type")
+		assert.Equal(t, EvType("EvAddURL"), d.EventType(), "AddURL must return EvAddURL type")
 	})
 
 	t.Run("Field integrity", func(t *testing.T) {

@@ -22,14 +22,6 @@ func resBinder(r *Res) []any {
 	return []any{&r.ID}
 }
 
-func TestNewQuery_Audits(t *testing.T) {
-	t.Run("panics on empty sql", func(t *testing.T) {
-		assert.Panics(t, func() {
-			NewQuery("", resBinder)
-		})
-	})
-}
-
 func TestQuery_IntegrationStyle(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)

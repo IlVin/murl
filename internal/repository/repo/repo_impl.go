@@ -133,7 +133,7 @@ func (r *repo) pushToWAL(e event.Event, err error) (event.Event, error) {
 // Используется для восстановления данных из WAL при старте приложения.
 func (r *repo) On(ctx context.Context, e event.Event) error {
 	switch e.GetType() {
-	case dto.EvAddURL:
+	case dto.EvType("EvAddURL"):
 		p, err := event.GetPayload[dto.AddURL](e)
 		if err != nil {
 			return err
@@ -143,7 +143,7 @@ func (r *repo) On(ctx context.Context, e event.Event) error {
 			return err
 		}
 		return nil
-	case dto.EvAddURLBySessionID:
+	case dto.EvType("EvAddURLBySessionID"):
 		p, err := event.GetPayload[dto.AddURLBySessionID](e)
 		if err != nil {
 			return err
@@ -153,7 +153,7 @@ func (r *repo) On(ctx context.Context, e event.Event) error {
 			return err
 		}
 		return nil
-	case dto.EvDeleteURLBySessionID:
+	case dto.EvType("EvDeleteURLBySessionID"):
 		p, err := event.GetPayload[dto.DeleteURLBySessionID](e)
 		if err != nil {
 			return err
@@ -163,7 +163,7 @@ func (r *repo) On(ctx context.Context, e event.Event) error {
 			return err
 		}
 		return nil
-	case dto.EvBatch:
+	case dto.EvType("EvBatch"):
 		p, err := event.GetPayload[dto.Batch](e)
 		if err != nil {
 			return err

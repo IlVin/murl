@@ -10,7 +10,7 @@ import (
 func TestDeleteURLBySessionID_EventType(t *testing.T) {
 	t.Run("Check correct event type", func(t *testing.T) {
 		d := DeleteURLBySessionID{}
-		assert.Equal(t, EvDeleteURLBySessionID, d.EventType())
+		assert.Equal(t, EvType("EvDeleteURLBySessionID"), d.EventType())
 	})
 
 	t.Run("Check data consistency", func(t *testing.T) {

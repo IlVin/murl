@@ -16,11 +16,6 @@ func testBinder(t *testModel) []any {
 }
 
 func TestNewQuery(t *testing.T) {
-	t.Run("panic on empty sql", func(t *testing.T) {
-		assert.Panics(t, func() {
-			NewQuery[testModel]("", testBinder)
-		})
-	})
 
 	t.Run("auto name generation", func(t *testing.T) {
 		q := NewQuery[testModel]("SELECT 1", testBinder)

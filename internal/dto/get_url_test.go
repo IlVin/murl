@@ -11,7 +11,7 @@ import (
 func TestGetURL_EventType(t *testing.T) {
 	t.Run("Check event type", func(t *testing.T) {
 		d := GetURL{}
-		assert.Equal(t, EvGetURL, d.EventType())
+		assert.Equal(t, EvType("EvGetURL"), d.EventType())
 	})
 
 	t.Run("Check JSON marshaling with IsGone", func(t *testing.T) {

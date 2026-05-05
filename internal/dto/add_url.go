@@ -5,6 +5,11 @@ package dto
 // AddURL представляет собой объект передачи данных для операции регистрации новой ссылки.
 // Используется как при входящих запросах на сокращение, так и в качестве события
 // для сохранения в журнале событий (Event Storage).
+//
+
+//go:generate go run murl/cmd/event $GOFILE
+
+//go:event
 type AddURL struct {
 	// OriginalURL — исходный длинный URL, который необходимо сократить.
 	OriginalURL string `json:"original_url"`
@@ -14,7 +19,3 @@ type AddURL struct {
 	// Помогает вышестоящим слоям определить HTTP статус ответа (например, 409 Conflict).
 	ConflictFlag bool `json:"conflict_flag"`
 }
-
-// EventType возвращает тип события EvAddURL.
-// Позволяет идентифицировать структуру при десериализации из лога событий.
-func (AddURL) EventType() EvType { return EvAddURL }
