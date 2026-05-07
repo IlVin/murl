@@ -16,6 +16,12 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
+)
+
 //go:generate go run murl/cmd/reset ./../../internal/
 
 func main() {
@@ -43,10 +49,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize config object: %w", err)
 	}
+
 	slog.Info("configuration initialized",
-		slog.String("version", cfg.Version()),
-		slog.String("router", cfg.RouterType()),
+		slog.String("version", buildVersion),
+		slog.String("date", buildDate),
+		slog.String("commit", buildCommit),
 	)
+
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
 
 	// Auditlog Observer
 	auditlog := auditlog.NewAuditlog()

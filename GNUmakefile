@@ -4,6 +4,7 @@ BINARY_NAME=${WORKDIR}/cmd/shortener/shortener
 MAIN_PATH=${WORKDIR}/cmd/shortener/main.go # Путь может отличаться, проверь его
 COVER_FILE=coverage.out
 DOCKER_IMG=shortener:latest
+VERSION=v1.0.1
 
 .PHONY: all build run test cover clean lint help
 
@@ -13,7 +14,7 @@ all: test build
 build:
 	@echo "Building binary..."
 	go generate ./...
-	CGO_ENABLED=0 GOOS=linux go build -o $(BINARY_NAME) $(MAIN_PATH)
+	CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildVersion=${VERSION} -X main.buildCommit=$$(git log -1 --format='%H') -X main.buildDate=$$(date +%F)" -o $(BINARY_NAME) $(MAIN_PATH)
 
 ## Docker-build: Сборка образа на базе пустого scratch
 docker-build: build
