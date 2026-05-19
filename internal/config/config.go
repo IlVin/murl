@@ -84,7 +84,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		cfg = cfg.SetDBDSN(s)
 		return nil
 	})
-	fs.Func("s", fmt.Sprintf("Enable HTTPS (%s)", cfg.EnabledHTTPS()), func(s string) error {
+	fs.Func("s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
 		if s == "" {
 			cfg = cfg.SetEnabledHTTPS(false)
 		} else {

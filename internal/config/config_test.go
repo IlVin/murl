@@ -134,7 +134,8 @@ func TestConfig_GettersSetters(t *testing.T) {
 			SetEventStoragePath("/tmp/ev").
 			SetAuditFile("/tmp/au").
 			SetAuditURL(u).
-			SetCompressibleContentTypes(contentTypes)
+			SetCompressibleContentTypes(contentTypes).
+			SetEnabledHTTPS(true)
 
 		assert.Equal(t, "2.0.0", newCfg.Version())
 		assert.Equal(t, time.Hour, newCfg.JWTTTL())
@@ -150,6 +151,7 @@ func TestConfig_GettersSetters(t *testing.T) {
 		assert.Equal(t, "/tmp/au", newCfg.AuditFile())
 		assert.Equal(t, u, newCfg.AuditURL())
 		assert.Equal(t, contentTypes, newCfg.CompressibleContentTypes())
+		assert.Equal(t, true, newCfg.EnabledHTTPS())
 	})
 
 	t.Run("SetShortBaseURL user stripping", func(t *testing.T) {
