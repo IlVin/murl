@@ -34,6 +34,7 @@ type Config struct {
 	keySession               KeySession
 	auditFile                string
 	auditURL                 *url.URL
+	enabledHTTPS             bool
 }
 
 // KeySession — тип-обертка для ключа сессии в контексте или куках.
@@ -74,12 +75,21 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		keySession:       "session",
 		auditFile:        "",
 		auditURL:         nil,
+		enabledHTTPS:     false,
 	}
 
 	// Command line arguments
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.Func("d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
 		cfg = cfg.SetDBDSN(s)
+		return nil
+	})
+	fs.Func("s", fmt.Sprintf("Enable HTTPS (%s)", cfg.EnabledHTTPS()), func(s string) error {
+		if s == "" {
+			cfg = cfg.SetEnabledHTTPS(false)
+		} else {
+			cfg = cfg.SetEnabledHTTPS(true)
+		}
 		return nil
 	})
 	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
@@ -208,6 +218,13 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 				return cfg, fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
 			}
 			cfg = cfg.SetAuditURL(u)
+		}
+	}
+	if s, ok := lookupEnv("ENABLE_HTTPS"); ok {
+		if s == "" {
+			cfg = cfg.SetEnabledHTTPS(false)
+		} else {
+			cfg = cfg.SetEnabledHTTPS(true)
 		}
 	}
 
@@ -380,6 +397,17 @@ func (c Config) ShortBaseURL() ShortBaseURL {
 func (c Config) SetShortBaseURL(sb ShortBaseURL) Config {
 	c.shortBaseURL.URL = sb.URL
 	c.shortBaseURL.User = nil
+	return c
+}
+
+// EnabledHTTPS HTTPS в веб-сервере включен
+func (c Config) EnabledHTTPS() bool {
+	return c.enabledHTTPS
+}
+
+// SetEnabledHTTPS включить/выключить HTTPS в веб-сервере
+func (c Config) SetEnabledHTTPS(enable bool) Config {
+	c.enabledHTTPS = enable
 	return c
 }
 
