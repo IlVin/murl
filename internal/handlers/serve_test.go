@@ -43,10 +43,16 @@ func (m *mockHandlers) DeleteAPIUserURLs() http.HandlerFunc {
 
 // mockServeCfg для теста функции Serve
 type mockServeCfg struct {
-	addr string
+	addr         string
+	keyFile      string
+	certFile     string
+	enabledHTTPS bool
 }
 
 func (m mockServeCfg) ListenAddr() string { return m.addr }
+func (m mockServeCfg) KeyFile() string    { return m.keyFile }
+func (m mockServeCfg) CertFile() string   { return m.certFile }
+func (m mockServeCfg) EnabledHTTPS() bool { return m.enabledHTTPS }
 
 func TestNewRouter(t *testing.T) {
 	// Используем NewConfig для создания базового конфига
