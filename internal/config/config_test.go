@@ -71,6 +71,26 @@ func TestNewConfig(t *testing.T) {
 		assert.Nil(t, cfg.AuditURL())
 	})
 
+	t.Run("Empty paths in flags and env", func(t *testing.T) {
+		// Пустые строки в путях не должны вызывать ошибок (ветки if s == "" { return nil })
+		args := []string{"-cert-file", "", "-key-file", "", "-s", ""}
+		mockEnv := map[string]string{
+			"CERT_FILE":    "",
+			"KEY_FILE":     "",
+			"ENABLE_HTTPS": "",
+		}
+		lookup := func(key string) (string, bool) {
+			val, ok := mockEnv[key]
+			return val, ok
+		}
+
+		cfg, err := NewConfig(&args, lookup)
+		require.NoError(t, err)
+		assert.Empty(t, cfg.EventStoragePath())
+		assert.Empty(t, cfg.AuditFile())
+		assert.Nil(t, cfg.AuditURL())
+	})
+
 	t.Run("Env priority over flags", func(t *testing.T) {
 		args := []string{"-a", "localhost:8080"}
 		mockEnv := map[string]string{
@@ -134,7 +154,10 @@ func TestConfig_GettersSetters(t *testing.T) {
 			SetEventStoragePath("/tmp/ev").
 			SetAuditFile("/tmp/au").
 			SetAuditURL(u).
-			SetCompressibleContentTypes(contentTypes)
+			SetCompressibleContentTypes(contentTypes).
+			SetEnabledHTTPS(true).
+			SetCertFile("/tmp/cert").
+			SetKeyFile("/tmp/key")
 
 		assert.Equal(t, "2.0.0", newCfg.Version())
 		assert.Equal(t, time.Hour, newCfg.JWTTTL())
@@ -150,6 +173,9 @@ func TestConfig_GettersSetters(t *testing.T) {
 		assert.Equal(t, "/tmp/au", newCfg.AuditFile())
 		assert.Equal(t, u, newCfg.AuditURL())
 		assert.Equal(t, contentTypes, newCfg.CompressibleContentTypes())
+		assert.Equal(t, true, newCfg.EnabledHTTPS())
+		assert.Equal(t, "/tmp/cert", newCfg.CertFile())
+		assert.Equal(t, "/tmp/key", newCfg.KeyFile())
 	})
 
 	t.Run("SetShortBaseURL user stripping", func(t *testing.T) {
@@ -203,6 +229,8 @@ func TestEnvValidationErrors(t *testing.T) {
 		{"BASE_URL", "::%"},
 		{"FILE_STORAGE_PATH", "/un/exist/ent/path/file"},
 		{"AUDIT_FILE", "/un/exist/ent/path/audit"},
+		{"CERT_FILE", "/un/exist/ent/path/cert"},
+		{"KEY_FILE", "/un/exist/ent/path/key"},
 		{"AUDIT_URL", "::%"},
 	}
 

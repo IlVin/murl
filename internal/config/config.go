@@ -34,6 +34,9 @@ type Config struct {
 	keySession               KeySession
 	auditFile                string
 	auditURL                 *url.URL
+	enabledHTTPS             bool
+	certFile                 string
+	keyFile                  string
 }
 
 // KeySession — тип-обертка для ключа сессии в контексте или куках.
@@ -74,12 +77,59 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		keySession:       "session",
 		auditFile:        "",
 		auditURL:         nil,
+		enabledHTTPS:     false,
+		certFile:         "",
+		keyFile:          "",
 	}
 
 	// Command line arguments
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.Func("d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
 		cfg = cfg.SetDBDSN(s)
+		return nil
+	})
+	fs.Func("s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
+		if s == "" {
+			cfg = cfg.SetEnabledHTTPS(false)
+		} else {
+			cfg = cfg.SetEnabledHTTPS(true)
+		}
+		return nil
+	})
+	fs.Func("cert-file", fmt.Sprintf("Path to HTTPS certificate file (%s)", cfg.CertFile()), func(s string) error {
+		if s == "" {
+			return nil
+		}
+		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
+		if err != nil {
+			return fmt.Errorf("invalid path to HTTPS certificate file: %w", err)
+		}
+		defer func() {
+			if err := fh.Close(); err != nil {
+				slog.Error("certificate file close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
+		cfg = cfg.SetCertFile(s)
+		return nil
+	})
+	fs.Func("key-file", fmt.Sprintf("Path to HTTPS key file (%s)", cfg.KeyFile()), func(s string) error {
+		if s == "" {
+			return nil
+		}
+		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
+		if err != nil {
+			return fmt.Errorf("invalid path to HTTPS key file: %w", err)
+		}
+		defer func() {
+			if err := fh.Close(); err != nil {
+				slog.Error("certificate file close fail",
+					slog.Any("err", err),
+				)
+			}
+		}()
+		cfg = cfg.SetKeyFile(s)
 		return nil
 	})
 	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
@@ -210,7 +260,45 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 			cfg = cfg.SetAuditURL(u)
 		}
 	}
-
+	if s, ok := lookupEnv("ENABLE_HTTPS"); ok {
+		if s == "" {
+			cfg = cfg.SetEnabledHTTPS(false)
+		} else {
+			cfg = cfg.SetEnabledHTTPS(true)
+		}
+	}
+	if s, ok := lookupEnv("CERT_FILE"); ok {
+		if s != "" {
+			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid ENV CERT_FILE: %w", err)
+			}
+			defer func() {
+				if err := fh.Close(); err != nil {
+					slog.Error("HTTP certificate file close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
+			cfg = cfg.SetCertFile(s)
+		}
+	}
+	if s, ok := lookupEnv("KEY_FILE"); ok {
+		if s != "" {
+			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
+			if err != nil {
+				return cfg, fmt.Errorf("invalid ENV KEY_FILE: %w", err)
+			}
+			defer func() {
+				if err := fh.Close(); err != nil {
+					slog.Error("HTTP key file close fail",
+						slog.Any("err", err),
+					)
+				}
+			}()
+			cfg = cfg.SetKeyFile(s)
+		}
+	}
 	if cfg.DBDSN() != "" {
 		cfg = cfg.SetRepoDrv("PgDB")
 	}
@@ -380,6 +468,39 @@ func (c Config) ShortBaseURL() ShortBaseURL {
 func (c Config) SetShortBaseURL(sb ShortBaseURL) Config {
 	c.shortBaseURL.URL = sb.URL
 	c.shortBaseURL.User = nil
+	return c
+}
+
+// EnabledHTTPS HTTPS в веб-сервере включен
+func (c Config) EnabledHTTPS() bool {
+	return c.enabledHTTPS
+}
+
+// SetEnabledHTTPS включить/выключить HTTPS в веб-сервере
+func (c Config) SetEnabledHTTPS(enable bool) Config {
+	c.enabledHTTPS = enable
+	return c
+}
+
+// CertFile возвращает путь к локальному файлу HTTPS сертификата.
+func (c Config) CertFile() string {
+	return c.certFile
+}
+
+// SetCertFile устанавливает путь к файлу HTTPS сертификата и возвращает обновленный конфиг.
+func (c Config) SetCertFile(certFile string) Config {
+	c.certFile = certFile
+	return c
+}
+
+// KeyFile возвращает путь к локальному файлу HTTPS ключа.
+func (c Config) KeyFile() string {
+	return c.keyFile
+}
+
+// SetKeyFile устанавливает путь к файлу HTTPS ключа и возвращает обновленный конфиг.
+func (c Config) SetKeyFile(keyFile string) Config {
+	c.keyFile = keyFile
 	return c
 }
 

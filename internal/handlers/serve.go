@@ -10,11 +10,12 @@ import (
 	_ "net/http/pprof"
 )
 
+//go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=serve_mock_test.go -package=$GOPACKAGE
+
 // RouterConfig определяет набор интерфейсов конфигурации, необходимых для настройки
 // роутера и всех подключаемых Middleware (сжатие, логирование, лимитер, сессии).
 type RouterConfig interface {
 	middleware.CompressConfig
-	middleware.LoggingConfig
 	middleware.LimiterConfig
 	middleware.SessionConfig
 	// RouterType возвращает идентификатор типа роутера ("chi" или "mux").
@@ -24,6 +25,9 @@ type RouterConfig interface {
 // IServeConfig содержит настройки, необходимые для физического запуска HTTP-сервера.
 type IServeConfig interface {
 	ListenAddr() string
+	EnabledHTTPS() bool
+	KeyFile() string
+	CertFile() string
 }
 
 // MicroURLHandlers описывает контракт объекта обработчиков, необходимых
@@ -150,5 +154,8 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 func Serve(cfg IServeConfig, router http.Handler) error {
 
 	slog.Info("Server started")
+	if cfg.EnabledHTTPS() {
+		return http.ListenAndServeTLS(cfg.ListenAddr(), cfg.CertFile(), cfg.KeyFile(), router)
+	}
 	return http.ListenAndServe(cfg.ListenAddr(), router)
 }
