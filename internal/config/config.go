@@ -37,6 +37,7 @@ type Config struct {
 	enabledHTTPS             bool
 	certFile                 string
 	keyFile                  string
+	configFile               string
 }
 
 // KeySession — тип-обертка для ключа сессии в контексте или куках.
@@ -80,6 +81,7 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		enabledHTTPS:     false,
 		certFile:         "",
 		keyFile:          "",
+		configFile:       "",
 	}
 
 	// Command line arguments
@@ -97,39 +99,21 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		return nil
 	})
 	fs.Func("cert-file", fmt.Sprintf("Path to HTTPS certificate file (%s)", cfg.CertFile()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to HTTPS certificate file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("certificate file close fail",
-					slog.Any("err", err),
-				)
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid path to HTTPS certificate file: %w", err)
 			}
-		}()
-		cfg = cfg.SetCertFile(s)
+			cfg = cfg.SetCertFile(s)
+		}
 		return nil
 	})
 	fs.Func("key-file", fmt.Sprintf("Path to HTTPS key file (%s)", cfg.KeyFile()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to HTTPS key file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("certificate file close fail",
-					slog.Any("err", err),
-				)
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid path to HTTPS key file: %w", err)
 			}
-		}()
-		cfg = cfg.SetKeyFile(s)
+			cfg = cfg.SetKeyFile(s)
+		}
 		return nil
 	})
 	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
@@ -149,39 +133,21 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		return nil
 	})
 	fs.Func("f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to event storage: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("event storage file close fail",
-					slog.Any("err", err),
-				)
+		if s != "" {
+			if err := canOpenOrCreateFile(s); err != nil {
+				return fmt.Errorf("invalid path to event storage: %w", err)
 			}
-		}()
-		cfg = cfg.SetEventStoragePath(s)
+			cfg = cfg.SetEventStoragePath(s)
+		}
 		return nil
 	})
 	fs.Func("audit-file", fmt.Sprintf("Path to audit file (%s)", cfg.AuditFile()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to audit file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("audit file close fail",
-					slog.Any("err", err),
-				)
+		if s != "" {
+			if err := canOpenOrCreateFile(s); err != nil {
+				return fmt.Errorf("invalid path to audit file: %w", err)
 			}
-		}()
-		cfg = cfg.SetAuditFile(s)
+			cfg = cfg.SetAuditFile(s)
+		}
 		return nil
 	})
 	fs.Func("audit-url", fmt.Sprintf("Audit URL (%s)", cfg.AuditURL()), func(s string) error {
@@ -221,33 +187,17 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok {
 		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-			if err != nil {
+			if err := canOpenOrCreateFile(s); err != nil {
 				return cfg, fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
 			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("evant storage file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
 			cfg = cfg.SetEventStoragePath(s)
 		}
 	}
 	if s, ok := lookupEnv("AUDIT_FILE"); ok {
 		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-			if err != nil {
+			if err := canOpenOrCreateFile(s); err != nil {
 				return cfg, fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
 			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("audit file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
 			cfg = cfg.SetAuditFile(s)
 		}
 	}
@@ -269,33 +219,17 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 	if s, ok := lookupEnv("CERT_FILE"); ok {
 		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-			if err != nil {
+			if err := canOpenFile(s); err != nil {
 				return cfg, fmt.Errorf("invalid ENV CERT_FILE: %w", err)
 			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("HTTP certificate file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
 			cfg = cfg.SetCertFile(s)
 		}
 	}
 	if s, ok := lookupEnv("KEY_FILE"); ok {
 		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-			if err != nil {
+			if err := canOpenFile(s); err != nil {
 				return cfg, fmt.Errorf("invalid ENV KEY_FILE: %w", err)
 			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("HTTP key file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
 			cfg = cfg.SetKeyFile(s)
 		}
 	}
@@ -504,6 +438,17 @@ func (c Config) SetKeyFile(keyFile string) Config {
 	return c
 }
 
+// KeyFile возвращает путь к локальному файлу HTTPS ключа.
+func (c Config) ConfigFile() string {
+	return c.configFile
+}
+
+// SetKeyFile устанавливает путь к файлу HTTPS ключа и возвращает обновленный конфиг.
+func (c Config) SetConfigFile(configFile string) Config {
+	c.configFile = configFile
+	return c
+}
+
 // ShardSize возвращает количество виртуальных шардов для InMemory хранилища.
 func (c Config) ShardSize() byte {
 	return c.shardSize
@@ -552,4 +497,34 @@ func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
 // String возвращает строковое представление URL.
 func (s ShortBaseURL) String() string {
 	return s.URL.String()
+}
+
+func canOpenOrCreateFile(path string) error {
+	fh, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return fmt.Errorf("cannot open or create file: %w", err)
+	}
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("close fail fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
+	return nil
+}
+
+func canOpenFile(path string) error {
+	fh, err := os.OpenFile(path, os.O_RDONLY, 0666)
+	if err != nil {
+		return fmt.Errorf("cannot open file: %w", err)
+	}
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("close fail fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
+	return nil
 }

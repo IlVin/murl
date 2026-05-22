@@ -77,6 +77,7 @@ func TestNewConfig(t *testing.T) {
 		mockEnv := map[string]string{
 			"CERT_FILE":    "",
 			"KEY_FILE":     "",
+			"CONFIG":       "",
 			"ENABLE_HTTPS": "",
 		}
 		lookup := func(key string) (string, bool) {
@@ -88,6 +89,9 @@ func TestNewConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, cfg.EventStoragePath())
 		assert.Empty(t, cfg.AuditFile())
+		assert.Empty(t, cfg.KeyFile())
+		assert.Empty(t, cfg.CertFile())
+		assert.Empty(t, cfg.ConfigFile())
 		assert.Nil(t, cfg.AuditURL())
 	})
 
@@ -157,7 +161,8 @@ func TestConfig_GettersSetters(t *testing.T) {
 			SetCompressibleContentTypes(contentTypes).
 			SetEnabledHTTPS(true).
 			SetCertFile("/tmp/cert").
-			SetKeyFile("/tmp/key")
+			SetKeyFile("/tmp/key").
+			SetConfigFile("/tmp/config")
 
 		assert.Equal(t, "2.0.0", newCfg.Version())
 		assert.Equal(t, time.Hour, newCfg.JWTTTL())
@@ -176,6 +181,7 @@ func TestConfig_GettersSetters(t *testing.T) {
 		assert.Equal(t, true, newCfg.EnabledHTTPS())
 		assert.Equal(t, "/tmp/cert", newCfg.CertFile())
 		assert.Equal(t, "/tmp/key", newCfg.KeyFile())
+		assert.Equal(t, "/tmp/config", newCfg.ConfigFile())
 	})
 
 	t.Run("SetShortBaseURL user stripping", func(t *testing.T) {
@@ -231,6 +237,7 @@ func TestEnvValidationErrors(t *testing.T) {
 		{"AUDIT_FILE", "/un/exist/ent/path/audit"},
 		{"CERT_FILE", "/un/exist/ent/path/cert"},
 		{"KEY_FILE", "/un/exist/ent/path/key"},
+		{"CONFIG", "/un/exist/ent/path/config"},
 		{"AUDIT_URL", "::%"},
 	}
 
