@@ -1,9 +1,15 @@
 package handlers
 
 import (
+	"context"
+	"log"
 	"log/slog"
 	"murl/internal/handlers/middleware"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	chi "github.com/go-chi/chi/v5"
 
@@ -152,10 +158,31 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 // Метод является блокирующим и возвращает ошибку, если сервер не смог запуститься
 // или прекратил работу аварийно.
 func Serve(cfg IServeConfig, router http.Handler) error {
-
-	slog.Info("Server started")
-	if cfg.EnabledHTTPS() {
-		return http.ListenAndServeTLS(cfg.ListenAddr(), cfg.CertFile(), cfg.KeyFile(), router)
+	srv := http.Server{
+		Addr:    cfg.ListenAddr(),
+		Handler: router,
 	}
-	return http.ListenAndServe(cfg.ListenAddr(), router)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		slog.Info("Server started")
+		if cfg.EnabledHTTPS() {
+			if err := srv.ListenAndServeTLS(cfg.CertFile(), cfg.KeyFile()); err != http.ErrServerClosed {
+				log.Fatalf("HTTP server ListenAndServeTLS: %v", err)
+			}
+		} else {
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("HTTP server ListenAndServe: %v", err)
+			}
+		}
+	}()
+
+	<-sigChan
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return srv.Shutdown(ctx)
 }
