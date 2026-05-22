@@ -6,13 +6,16 @@
 package config
 
 import (
-	"flag"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 // Config представляет собой иммутабельную структуру конфигурации приложения.
@@ -37,6 +40,7 @@ type Config struct {
 	enabledHTTPS             bool
 	certFile                 string
 	keyFile                  string
+	configFile               string
 }
 
 // KeySession — тип-обертка для ключа сессии в контексте или куках.
@@ -80,110 +84,283 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		enabledHTTPS:     false,
 		certFile:         "",
 		keyFile:          "",
+		configFile:       "",
+	}
+
+	// JSON Config
+	if err := cfg.readJSONConfig(cmdArgs, lookupEnv); err != nil {
+		return cfg, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
 	// Command line arguments
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	fs.Func("d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
-		cfg = cfg.SetDBDSN(s)
-		return nil
-	})
-	fs.Func("s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
-		if s == "" {
-			cfg = cfg.SetEnabledHTTPS(false)
-		} else {
-			cfg = cfg.SetEnabledHTTPS(true)
-		}
-		return nil
-	})
-	fs.Func("cert-file", fmt.Sprintf("Path to HTTPS certificate file (%s)", cfg.CertFile()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to HTTPS certificate file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("certificate file close fail",
-					slog.Any("err", err),
-				)
+	if err := cfg.readCmdArgs(cmdArgs); err != nil {
+		return cfg, fmt.Errorf("failed to parse command line args: %w", err)
+	}
+
+	// Парсинг переменных окружения
+	if err := cfg.readEnv(lookupEnv); err != nil {
+		return cfg, err
+	}
+
+	return cfg, nil
+}
+
+func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) error {
+	if cmdArgs != nil {
+		fs := pflag.NewFlagSet("json", pflag.ContinueOnError)
+		fs.ParseErrorsAllowlist.UnknownFlags = true
+		fs.SetInterspersed(true)
+		fs.SetOutput(io.Discard)
+
+		fs.FuncP("config", "c", fmt.Sprintf("Path to config file (%s)", cfg.ConfigFile()), func(s string) error {
+			if s != "" {
+				if err := canOpenFile(s); err != nil {
+					return fmt.Errorf("invalid path to config file: %w", err)
+				}
+				*cfg = cfg.SetConfigFile(s)
 			}
-		}()
-		cfg = cfg.SetCertFile(s)
-		return nil
-	})
-	fs.Func("key-file", fmt.Sprintf("Path to HTTPS key file (%s)", cfg.KeyFile()), func(s string) error {
-		if s == "" {
 			return nil
+		})
+
+		if err := fs.Parse(*cmdArgs); err != nil {
+			return fmt.Errorf("failed to parse flags: %w", err)
 		}
-		fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to HTTPS key file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("certificate file close fail",
-					slog.Any("err", err),
-				)
+	}
+
+	if s, ok := lookupEnv("CONFIG"); ok {
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid ENV CONFIG: %w", err)
 			}
-		}()
-		cfg = cfg.SetKeyFile(s)
+			*cfg = cfg.SetConfigFile(s)
+		}
+	}
+
+	if cfg.ConfigFile() == "" {
 		return nil
-	})
-	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
+	}
+
+	type ConfigParams struct {
+		ServerAddress   string `json:"server_address,omitempty"`    // аналог переменной окружения SERVER_ADDRESS или флага -a
+		BaseURL         string `json:"base_url,omitempty"`          // аналог переменной окружения BASE_URL или флага -b
+		FileStoragePath string `json:"file_storage_path,omitempty"` // аналог переменной окружения FILE_STORAGE_PATH или флага -f
+		DatabaseDSN     string `json:"database_dsn"`                // аналог переменной окружения DATABASE_DSN или флага -d
+		EnableHTTPS     bool   `json:"enable_https,omitempty"`      // аналог переменной окружения ENABLE_HTTPS или флага -s
+		KeyFile         string `json:"key_file,omitempty"`
+		CertFile        string `json:"cert_file,omitempty"`
+		AuditFile       string `json:"audit_file,omitempty"`
+		AuditURL        string `json:"audit_url,omitempty"`
+	}
+
+	var tmp ConfigParams
+
+	cfgFile, err := os.Open(cfg.ConfigFile())
+	if err != nil {
+		return fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer cfgFile.Close()
+
+	if err := json.NewDecoder(cfgFile).Decode(&tmp); err != nil {
+		return fmt.Errorf("failed to decode json: %w", err)
+	}
+
+	if val := tmp.ServerAddress; val != "" {
+		addr, err := NewSocketAddr(val)
+		if err != nil {
+			return fmt.Errorf("config server_address error: %w", err)
+		}
+		*cfg = cfg.SetListenAddr(addr)
+	}
+
+	if val := tmp.BaseURL; val != "" {
+		sb, err := NewShortBaseURL(val)
+		if err != nil {
+			return fmt.Errorf("config base_url error: %w", err)
+		}
+		*cfg = cfg.SetShortBaseURL(sb)
+	}
+
+	if val := tmp.FileStoragePath; val != "" {
+		if err := canOpenOrCreateFile(val); err != nil {
+			return fmt.Errorf("config file_storege_path error: %w", err)
+		}
+		*cfg = cfg.SetEventStoragePath(val)
+	}
+
+	if val := tmp.DatabaseDSN; val != "" {
+		*cfg = cfg.SetDBDSN(val)
+	}
+
+	if val := tmp.EnableHTTPS; val == true {
+		if keyFile := tmp.KeyFile; keyFile != "" {
+			if certFile := tmp.CertFile; certFile != "" {
+				*cfg = cfg.
+					SetEnabledHTTPS(true).
+					SetKeyFile(keyFile).
+					SetCertFile(certFile)
+			}
+		}
+	}
+
+	if val := tmp.AuditFile; val != "" {
+		if err := canOpenOrCreateFile(val); err != nil {
+			return fmt.Errorf("config audit_file error: %w", err)
+		}
+		*cfg = cfg.SetAuditFile(val)
+	}
+
+	if val := tmp.AuditURL; val != "" {
+		u, err := url.Parse(val)
+		if err != nil {
+			return fmt.Errorf("config audit_url error: %w", err)
+		}
+		*cfg = cfg.SetAuditURL(u)
+	}
+
+	return nil
+}
+
+func (cfg *Config) readEnv(lookupEnv LookupEnvFunc) error {
+	if val, ok := lookupEnv("DATABASE_DSN"); ok && val != "" {
+		*cfg = cfg.SetDBDSN(val)
+	}
+	if val, ok := lookupEnv("SERVER_ADDRESS"); ok && val != "" {
+		addr, err := NewSocketAddr(val)
+		if err != nil {
+			return fmt.Errorf("env SERVER_ADDRESS error: %w", err)
+		}
+		*cfg = cfg.SetListenAddr(addr)
+	}
+	if val, ok := lookupEnv("BASE_URL"); ok && val != "" {
+		sb, err := NewShortBaseURL(val)
+		if err != nil {
+			return fmt.Errorf("env BASE_URL error: %w", err)
+		}
+		*cfg = cfg.SetShortBaseURL(sb)
+	}
+	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok && s != "" {
+		if err := canOpenOrCreateFile(s); err != nil {
+			return fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
+		}
+		*cfg = cfg.SetEventStoragePath(s)
+	}
+	if s, ok := lookupEnv("AUDIT_FILE"); ok && s != "" {
+		if err := canOpenOrCreateFile(s); err != nil {
+			return fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
+		}
+		*cfg = cfg.SetAuditFile(s)
+	}
+	if s, ok := lookupEnv("AUDIT_URL"); ok && s != "" {
+		u, err := url.Parse(s)
+		if err != nil {
+			return fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
+		}
+		*cfg = cfg.SetAuditURL(u)
+	}
+	if s, ok := lookupEnv("ENABLE_HTTPS"); ok && s != "" && s != "0" && s != "false" {
+		*cfg = cfg.SetEnabledHTTPS(true)
+	}
+	if s, ok := lookupEnv("CERT_FILE"); ok && s != "" {
+		if err := canOpenFile(s); err != nil {
+			return fmt.Errorf("invalid ENV CERT_FILE: %w", err)
+		}
+		*cfg = cfg.SetCertFile(s)
+	}
+	if s, ok := lookupEnv("KEY_FILE"); ok && s != "" {
+		if err := canOpenFile(s); err != nil {
+			return fmt.Errorf("invalid ENV KEY_FILE: %w", err)
+		}
+		*cfg = cfg.SetKeyFile(s)
+	}
+	if cfg.DBDSN() != "" {
+		*cfg = cfg.SetRepoDrv("PgDB")
+	}
+
+	return nil
+}
+
+func (cfg *Config) readCmdArgs(cmdArgs *[]string) error {
+	if cmdArgs == nil || len(*cmdArgs) == 0 {
+		return nil
+	}
+
+	fs := pflag.NewFlagSet("config", pflag.ContinueOnError)
+	fs.ParseErrorsAllowlist.UnknownFlags = true
+	fs.SetInterspersed(true)
+	fs.SetOutput(io.Discard)
+
+	fs.FuncP("addr", "a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
 		sAddr, err := NewSocketAddr(s)
 		if err != nil {
 			return fmt.Errorf("invalid ListenAddr format: %w", err)
 		}
-		cfg = cfg.SetListenAddr(sAddr)
+		*cfg = cfg.SetListenAddr(sAddr)
 		return nil
 	})
-	fs.Func("b", fmt.Sprintf("Base address for short URL (%s)", cfg.ShortBaseURL()), func(s string) error {
+
+	fs.FuncP("dsn", "d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
+		*cfg = cfg.SetDBDSN(s)
+		return nil
+	})
+
+	fs.FuncP("enable-https", "s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
+		if s == "" || s == "0" || s == "false" {
+			*cfg = cfg.SetEnabledHTTPS(false)
+		} else {
+			*cfg = cfg.SetEnabledHTTPS(true)
+		}
+		return nil
+	})
+
+	fs.Func("cert-file", fmt.Sprintf("Path to HTTPS certificate file (%s)", cfg.CertFile()), func(s string) error {
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid path to HTTPS certificate file: %w", err)
+			}
+			*cfg = cfg.SetCertFile(s)
+		}
+		return nil
+	})
+
+	fs.Func("key-file", fmt.Sprintf("Path to HTTPS key file (%s)", cfg.KeyFile()), func(s string) error {
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid path to HTTPS key file: %w", err)
+			}
+			*cfg = cfg.SetKeyFile(s)
+		}
+		return nil
+	})
+
+	fs.FuncP("base-address", "b", fmt.Sprintf("Base address for short URL (%s)", cfg.ShortBaseURL()), func(s string) error {
 		sbURL, err := NewShortBaseURL(s)
 		if err != nil {
 			return fmt.Errorf("invalid ShortBaseURL format: %w", err)
 		}
-		cfg = cfg.SetShortBaseURL(sbURL)
+		*cfg = cfg.SetShortBaseURL(sbURL)
 		return nil
 	})
-	fs.Func("f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to event storage: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("event storage file close fail",
-					slog.Any("err", err),
-				)
+
+	fs.FuncP("file-storeage", "f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
+		if s != "" {
+			if err := canOpenOrCreateFile(s); err != nil {
+				return fmt.Errorf("invalid path to event storage: %w", err)
 			}
-		}()
-		cfg = cfg.SetEventStoragePath(s)
+			*cfg = cfg.SetEventStoragePath(s)
+		}
 		return nil
 	})
+
 	fs.Func("audit-file", fmt.Sprintf("Path to audit file (%s)", cfg.AuditFile()), func(s string) error {
-		if s == "" {
-			return nil
-		}
-		fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			return fmt.Errorf("invalid path to audit file: %w", err)
-		}
-		defer func() {
-			if err := fh.Close(); err != nil {
-				slog.Error("audit file close fail",
-					slog.Any("err", err),
-				)
+		if s != "" {
+			if err := canOpenOrCreateFile(s); err != nil {
+				return fmt.Errorf("invalid path to audit file: %w", err)
 			}
-		}()
-		cfg = cfg.SetAuditFile(s)
+			*cfg = cfg.SetAuditFile(s)
+		}
 		return nil
 	})
+
 	fs.Func("audit-url", fmt.Sprintf("Audit URL (%s)", cfg.AuditURL()), func(s string) error {
 		if s == "" {
 			return nil
@@ -192,117 +369,15 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		if err != nil {
 			return fmt.Errorf("invalid --audit-url: %w", err)
 		}
-		cfg = cfg.SetAuditURL(u)
+		*cfg = cfg.SetAuditURL(u)
 		return nil
 	})
-	if cmdArgs != nil {
-		if err := fs.Parse(*cmdArgs); err != nil {
-			return cfg, fmt.Errorf("failed to parse flags: %w", err)
-		}
+
+	if err := fs.Parse(*cmdArgs); err != nil {
+		return fmt.Errorf("failed to parse flags: %w", err)
 	}
 
-	// Парсинг переменных окружения
-	if val, ok := lookupEnv("DATABASE_DSN"); ok {
-		cfg = cfg.SetDBDSN(val)
-	}
-	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
-		addr, err := NewSocketAddr(val)
-		if err != nil {
-			return cfg, fmt.Errorf("env SERVER_ADDRESS error: %w", err)
-		}
-		cfg = cfg.SetListenAddr(addr)
-	}
-	if val, ok := lookupEnv("BASE_URL"); ok {
-		sb, err := NewShortBaseURL(val)
-		if err != nil {
-			return cfg, fmt.Errorf("env BASE_URL error: %w", err)
-		}
-		cfg = cfg.SetShortBaseURL(sb)
-	}
-	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok {
-		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-			if err != nil {
-				return cfg, fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
-			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("evant storage file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
-			cfg = cfg.SetEventStoragePath(s)
-		}
-	}
-	if s, ok := lookupEnv("AUDIT_FILE"); ok {
-		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
-			if err != nil {
-				return cfg, fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
-			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("audit file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
-			cfg = cfg.SetAuditFile(s)
-		}
-	}
-	if s, ok := lookupEnv("AUDIT_URL"); ok {
-		if s != "" {
-			u, err := url.Parse(s)
-			if err != nil {
-				return cfg, fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
-			}
-			cfg = cfg.SetAuditURL(u)
-		}
-	}
-	if s, ok := lookupEnv("ENABLE_HTTPS"); ok {
-		if s == "" {
-			cfg = cfg.SetEnabledHTTPS(false)
-		} else {
-			cfg = cfg.SetEnabledHTTPS(true)
-		}
-	}
-	if s, ok := lookupEnv("CERT_FILE"); ok {
-		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-			if err != nil {
-				return cfg, fmt.Errorf("invalid ENV CERT_FILE: %w", err)
-			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("HTTP certificate file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
-			cfg = cfg.SetCertFile(s)
-		}
-	}
-	if s, ok := lookupEnv("KEY_FILE"); ok {
-		if s != "" {
-			fh, err := os.OpenFile(s, os.O_RDONLY, 0666)
-			if err != nil {
-				return cfg, fmt.Errorf("invalid ENV KEY_FILE: %w", err)
-			}
-			defer func() {
-				if err := fh.Close(); err != nil {
-					slog.Error("HTTP key file close fail",
-						slog.Any("err", err),
-					)
-				}
-			}()
-			cfg = cfg.SetKeyFile(s)
-		}
-	}
-	if cfg.DBDSN() != "" {
-		cfg = cfg.SetRepoDrv("PgDB")
-	}
-	return cfg, nil
+	return nil
 }
 
 // JWTTTL возвращает время жизни JWT токена.
@@ -504,6 +579,17 @@ func (c Config) SetKeyFile(keyFile string) Config {
 	return c
 }
 
+// KeyFile возвращает путь к локальному файлу HTTPS ключа.
+func (c Config) ConfigFile() string {
+	return c.configFile
+}
+
+// SetKeyFile устанавливает путь к файлу HTTPS ключа и возвращает обновленный конфиг.
+func (c Config) SetConfigFile(configFile string) Config {
+	c.configFile = configFile
+	return c
+}
+
 // ShardSize возвращает количество виртуальных шардов для InMemory хранилища.
 func (c Config) ShardSize() byte {
 	return c.shardSize
@@ -552,4 +638,34 @@ func NewShortBaseURL(baseURL string) (ShortBaseURL, error) {
 // String возвращает строковое представление URL.
 func (s ShortBaseURL) String() string {
 	return s.URL.String()
+}
+
+func canOpenOrCreateFile(path string) error {
+	fh, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return fmt.Errorf("cannot open or create file: %w", err)
+	}
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("close fail fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
+	return nil
+}
+
+func canOpenFile(path string) error {
+	fh, err := os.OpenFile(path, os.O_RDONLY, 0666)
+	if err != nil {
+		return fmt.Errorf("cannot open file: %w", err)
+	}
+	defer func() {
+		if err := fh.Close(); err != nil {
+			slog.Error("close fail fail",
+				slog.Any("err", err),
+			)
+		}
+	}()
+	return nil
 }
