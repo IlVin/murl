@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"testing"
@@ -236,7 +237,6 @@ func TestEnvValidationErrors(t *testing.T) {
 		{"AUDIT_FILE", "/un/exist/ent/path/audit"},
 		{"CERT_FILE", "/un/exist/ent/path/cert"},
 		{"KEY_FILE", "/un/exist/ent/path/key"},
-		{"CONFIG", "/un/exist/ent/path/config"},
 		{"AUDIT_URL", "::%"},
 	}
 
@@ -252,4 +252,129 @@ func TestEnvValidationErrors(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestJSONConfig(t *testing.T) {
+	certPath := "/tmp/test.crt"
+	keyPath := "/tmp/test.key"
+	auditPath := "/tmp/json-audit.log"
+	configPath := "/tmp/config_test.json"
+
+	// Создаем окружение
+	_ = os.WriteFile(certPath, []byte("cert"), 0666)
+	_ = os.WriteFile(keyPath, []byte("key"), 0666)
+	_ = os.WriteFile(auditPath, []byte(""), 0666)
+
+	defer func() {
+		os.Remove(certPath)
+		os.Remove(keyPath)
+		os.Remove(auditPath)
+		os.Remove(configPath)
+	}()
+
+	fullJSON := fmt.Sprintf(`{
+			"server_address": "127.0.0.1:7070",
+			"base_url": "https://json-url.com",
+			"database_dsn": "postgres://json",
+			"enable_https": true,
+			"cert_file": "%s",
+			"key_file": "%s",
+			"audit_file": "%s"
+		}`, certPath, keyPath, auditPath)
+	_ = os.WriteFile(configPath, []byte(fullJSON), 0666)
+
+	t.Run("Read full config with HTTPS", func(t *testing.T) {
+		args := []string{"-c", configPath}
+		cfg, err := NewConfig(&args, nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, "127.0.0.1:7070", cfg.ListenAddr())
+		assert.Equal(t, "https://json-url.com", cfg.ShortBaseURL().String())
+		assert.Equal(t, "postgres://json", cfg.DBDSN())
+		assert.True(t, cfg.EnabledHTTPS())
+	})
+
+	t.Run("HTTPS remains disabled without cert/key", func(t *testing.T) {
+		incompleteJSON := `{"enable_https": true, "server_address": "127.0.0.1:8080"}`
+		_ = os.WriteFile(configPath, []byte(incompleteJSON), 0666)
+
+		args := []string{"-c", configPath}
+		cfg, err := NewConfig(&args, nil)
+
+		require.NoError(t, err)
+		assert.False(t, cfg.EnabledHTTPS(), "Should be false because cert/key missing in JSON")
+	})
+
+	t.Run("Read from JSON file via ENV", func(t *testing.T) {
+		// Используем файл, оставшийся от предыдущего теста (адрес 8080)
+		mockEnv := map[string]string{"CONFIG": configPath}
+		lookup := func(k string) (string, bool) { return mockEnv[k], true }
+
+		cfg, err := NewConfig(nil, lookup)
+		require.NoError(t, err)
+		assert.Equal(t, configPath, cfg.ConfigFile())
+		assert.Equal(t, "127.0.0.1:8080", cfg.ListenAddr())
+	})
+
+	t.Run("JSON parse error", func(t *testing.T) {
+		badJSONPath := "/tmp/bad_json.json"
+		_ = os.WriteFile(badJSONPath, []byte("{ invalid json"), 0666)
+		defer os.Remove(badJSONPath)
+
+		args := []string{"-c", badJSONPath}
+		_, err := NewConfig(&args, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("JSON non-existent file", func(t *testing.T) {
+		args := []string{"-c", "/tmp/missing_file_999.json"}
+		_, err := NewConfig(&args, nil)
+		assert.Error(t, err)
+	})
+}
+
+func TestConfig_PriorityChain(t *testing.T) {
+	// 1. JSON (самый низкий после default)
+	configPath := "/tmp/priority.json"
+	_ = os.WriteFile(configPath, []byte(`{"server_address": "json:1"}`), 0666)
+	defer os.Remove(configPath)
+
+	// 2. Флаг (перекрывает JSON)
+	args := []string{"-c", configPath, "-a", "flag:2"}
+
+	// 3. ENV (перекрывает Флаг)
+	mockEnv := map[string]string{"SERVER_ADDRESS": "env:3"}
+	lookup := func(k string) (string, bool) {
+		val, ok := mockEnv[k]
+		return val, ok
+	}
+
+	cfg, err := NewConfig(&args, lookup)
+	require.NoError(t, err)
+
+	// В итоге должен победить ENV
+	assert.Equal(t, "env:3", cfg.ListenAddr())
+}
+
+func TestConfig_SpecialCases(t *testing.T) {
+	t.Run("Invalid path in JSON fields", func(t *testing.T) {
+		path := "/tmp/invalid_fields.json"
+		// Путь к файлу, который нельзя создать
+		_ = os.WriteFile(path, []byte(`{"file_storage_path": "/proc/invalid/path"}`), 0666)
+		defer os.Remove(path)
+
+		args := []string{"-c", path}
+		_, err := NewConfig(&args, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid URL in JSON", func(t *testing.T) {
+		path := "/tmp/invalid_url.json"
+		_ = os.WriteFile(path, []byte(`{"audit_url": "::%"}`), 0666)
+		defer os.Remove(path)
+
+		args := []string{"-c", path}
+		_, err := NewConfig(&args, nil)
+		assert.Error(t, err)
+	})
 }

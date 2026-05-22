@@ -6,6 +6,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -105,27 +106,25 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 }
 
 func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) error {
-	if cmdArgs == nil || len(*cmdArgs) == 0 {
-		return nil
-	}
+	if cmdArgs != nil {
+		fs := pflag.NewFlagSet("json", pflag.ContinueOnError)
+		fs.ParseErrorsAllowlist.UnknownFlags = true
+		fs.SetInterspersed(true)
+		fs.SetOutput(io.Discard)
 
-	fs := pflag.NewFlagSet("json", pflag.ContinueOnError)
-	fs.ParseErrorsAllowlist.UnknownFlags = true
-	fs.SetInterspersed(true)
-	fs.SetOutput(io.Discard)
-
-	fs.FuncP("config", "c", fmt.Sprintf("Path to config file (%s)", cfg.ConfigFile()), func(s string) error {
-		if s != "" {
-			if err := canOpenFile(s); err != nil {
-				return fmt.Errorf("invalid path to config file: %w", err)
+		fs.FuncP("config", "c", fmt.Sprintf("Path to config file (%s)", cfg.ConfigFile()), func(s string) error {
+			if s != "" {
+				if err := canOpenFile(s); err != nil {
+					return fmt.Errorf("invalid path to config file: %w", err)
+				}
+				*cfg = cfg.SetConfigFile(s)
 			}
-			*cfg = cfg.SetConfigFile(s)
-		}
-		return nil
-	})
+			return nil
+		})
 
-	if err := fs.Parse(*cmdArgs); err != nil {
-		return fmt.Errorf("failed to parse flags: %w", err)
+		if err := fs.Parse(*cmdArgs); err != nil {
+			return fmt.Errorf("failed to parse flags: %w", err)
+		}
 	}
 
 	if s, ok := lookupEnv("CONFIG"); ok {
@@ -135,87 +134,146 @@ func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) er
 			}
 			*cfg = cfg.SetConfigFile(s)
 		}
+	}
+
+	if cfg.ConfigFile() == "" {
+		return nil
+	}
+
+	type ConfigParams struct {
+		ServerAddress   string `json:"server_address,omitempty"`    // аналог переменной окружения SERVER_ADDRESS или флага -a
+		BaseURL         string `json:"base_url,omitempty"`          // аналог переменной окружения BASE_URL или флага -b
+		FileStoragePath string `json:"file_storage_path,omitempty"` // аналог переменной окружения FILE_STORAGE_PATH или флага -f
+		DatabaseDSN     string `json:"database_dsn"`                // аналог переменной окружения DATABASE_DSN или флага -d
+		EnableHTTPS     bool   `json:"enable_https,omitempty"`      // аналог переменной окружения ENABLE_HTTPS или флага -s
+		KeyFile         string `json:"key_file,omitempty"`
+		CertFile        string `json:"cert_file,omitempty"`
+		AuditFile       string `json:"audit_file,omitempty"`
+		AuditURL        string `json:"audit_url,omitempty"`
+	}
+
+	var tmp ConfigParams
+
+	cfgFile, err := os.Open(cfg.ConfigFile())
+	if err != nil {
+		return fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer cfgFile.Close()
+
+	if err := json.NewDecoder(cfgFile).Decode(&tmp); err != nil {
+		return fmt.Errorf("failed to decode json: %w", err)
+	}
+
+	if val := tmp.ServerAddress; val != "" {
+		addr, err := NewSocketAddr(val)
+		if err != nil {
+			return fmt.Errorf("config server_address error: %w", err)
+		}
+		*cfg = cfg.SetListenAddr(addr)
+	}
+
+	if val := tmp.BaseURL; val != "" {
+		sb, err := NewShortBaseURL(val)
+		if err != nil {
+			return fmt.Errorf("config base_url error: %w", err)
+		}
+		*cfg = cfg.SetShortBaseURL(sb)
+	}
+
+	if val := tmp.FileStoragePath; val != "" {
+		if err := canOpenOrCreateFile(val); err != nil {
+			return fmt.Errorf("config file_storege_path error: %w", err)
+		}
+		*cfg = cfg.SetEventStoragePath(val)
+	}
+
+	if val := tmp.DatabaseDSN; val != "" {
+		*cfg = cfg.SetDBDSN(val)
+	}
+
+	if val := tmp.EnableHTTPS; val == true {
+		if keyFile := tmp.KeyFile; keyFile != "" {
+			if certFile := tmp.CertFile; certFile != "" {
+				*cfg = cfg.
+					SetEnabledHTTPS(true).
+					SetKeyFile(keyFile).
+					SetCertFile(certFile)
+			}
+		}
+	}
+
+	if val := tmp.AuditFile; val != "" {
+		if err := canOpenOrCreateFile(val); err != nil {
+			return fmt.Errorf("config audit_file error: %w", err)
+		}
+		*cfg = cfg.SetAuditFile(val)
+	}
+
+	if val := tmp.AuditURL; val != "" {
+		u, err := url.Parse(val)
+		if err != nil {
+			return fmt.Errorf("config audit_url error: %w", err)
+		}
+		*cfg = cfg.SetAuditURL(u)
 	}
 
 	return nil
 }
 
 func (cfg *Config) readEnv(lookupEnv LookupEnvFunc) error {
-	if val, ok := lookupEnv("DATABASE_DSN"); ok {
+	if val, ok := lookupEnv("DATABASE_DSN"); ok && val != "" {
 		*cfg = cfg.SetDBDSN(val)
 	}
-	if val, ok := lookupEnv("SERVER_ADDRESS"); ok {
+	if val, ok := lookupEnv("SERVER_ADDRESS"); ok && val != "" {
 		addr, err := NewSocketAddr(val)
 		if err != nil {
 			return fmt.Errorf("env SERVER_ADDRESS error: %w", err)
 		}
 		*cfg = cfg.SetListenAddr(addr)
 	}
-	if val, ok := lookupEnv("BASE_URL"); ok {
+	if val, ok := lookupEnv("BASE_URL"); ok && val != "" {
 		sb, err := NewShortBaseURL(val)
 		if err != nil {
 			return fmt.Errorf("env BASE_URL error: %w", err)
 		}
 		*cfg = cfg.SetShortBaseURL(sb)
 	}
-	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok {
-		if s != "" {
-			if err := canOpenOrCreateFile(s); err != nil {
-				return fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
-			}
-			*cfg = cfg.SetEventStoragePath(s)
+	if s, ok := lookupEnv("FILE_STORAGE_PATH"); ok && s != "" {
+		if err := canOpenOrCreateFile(s); err != nil {
+			return fmt.Errorf("env FILE_STORAGE_PATH error: invalid path to event storage: %w", err)
 		}
+		*cfg = cfg.SetEventStoragePath(s)
 	}
-	if s, ok := lookupEnv("AUDIT_FILE"); ok {
-		if s != "" {
-			if err := canOpenOrCreateFile(s); err != nil {
-				return fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
-			}
-			*cfg = cfg.SetAuditFile(s)
+	if s, ok := lookupEnv("AUDIT_FILE"); ok && s != "" {
+		if err := canOpenOrCreateFile(s); err != nil {
+			return fmt.Errorf("invalid ENV AUDIT_FILE: %w", err)
 		}
+		*cfg = cfg.SetAuditFile(s)
 	}
-	if s, ok := lookupEnv("AUDIT_URL"); ok {
-		if s != "" {
-			u, err := url.Parse(s)
-			if err != nil {
-				return fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
-			}
-			*cfg = cfg.SetAuditURL(u)
+	if s, ok := lookupEnv("AUDIT_URL"); ok && s != "" {
+		u, err := url.Parse(s)
+		if err != nil {
+			return fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
 		}
+		*cfg = cfg.SetAuditURL(u)
 	}
-	if s, ok := lookupEnv("ENABLE_HTTPS"); ok {
-		if s == "" || s == "0" || s == "false" {
-			*cfg = cfg.SetEnabledHTTPS(false)
-		} else {
-			*cfg = cfg.SetEnabledHTTPS(true)
-		}
+	if s, ok := lookupEnv("ENABLE_HTTPS"); ok && s != "" && s != "0" && s != "false" {
+		*cfg = cfg.SetEnabledHTTPS(true)
 	}
-	if s, ok := lookupEnv("CERT_FILE"); ok {
-		if s != "" {
-			if err := canOpenFile(s); err != nil {
-				return fmt.Errorf("invalid ENV CERT_FILE: %w", err)
-			}
-			*cfg = cfg.SetCertFile(s)
+	if s, ok := lookupEnv("CERT_FILE"); ok && s != "" {
+		if err := canOpenFile(s); err != nil {
+			return fmt.Errorf("invalid ENV CERT_FILE: %w", err)
 		}
+		*cfg = cfg.SetCertFile(s)
 	}
-	if s, ok := lookupEnv("KEY_FILE"); ok {
-		if s != "" {
-			if err := canOpenFile(s); err != nil {
-				return fmt.Errorf("invalid ENV KEY_FILE: %w", err)
-			}
-			*cfg = cfg.SetKeyFile(s)
+	if s, ok := lookupEnv("KEY_FILE"); ok && s != "" {
+		if err := canOpenFile(s); err != nil {
+			return fmt.Errorf("invalid ENV KEY_FILE: %w", err)
 		}
+		*cfg = cfg.SetKeyFile(s)
 	}
 	if cfg.DBDSN() != "" {
 		*cfg = cfg.SetRepoDrv("PgDB")
-	}
-	if s, ok := lookupEnv("CONFIG"); ok {
-		if s != "" {
-			if err := canOpenFile(s); err != nil {
-				return fmt.Errorf("invalid ENV CONFIG: %w", err)
-			}
-			*cfg = cfg.SetConfigFile(s)
-		}
 	}
 
 	return nil
