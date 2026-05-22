@@ -6,13 +6,15 @@
 package config
 
 import (
-	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 // Config представляет собой иммутабельную структуру конфигурации приложения.
@@ -84,14 +86,14 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 		configFile:       "",
 	}
 
-	// Command line arguments
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	cfg.regCmdArgs(fs)
+	// JSON Config
+	if err := cfg.readJSONConfig(cmdArgs, lookupEnv); err != nil {
+		return cfg, fmt.Errorf("failed to parse config file: %w", err)
+	}
 
-	if cmdArgs != nil {
-		if err := fs.Parse(*cmdArgs); err != nil {
-			return cfg, fmt.Errorf("failed to parse flags: %w", err)
-		}
+	// Command line arguments
+	if err := cfg.readCmdArgs(cmdArgs); err != nil {
+		return cfg, fmt.Errorf("failed to parse command line args: %w", err)
 	}
 
 	// Парсинг переменных окружения
@@ -100,6 +102,42 @@ func NewConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) error {
+	if cmdArgs == nil || len(*cmdArgs) == 0 {
+		return nil
+	}
+
+	fs := pflag.NewFlagSet("json", pflag.ContinueOnError)
+	fs.ParseErrorsAllowlist.UnknownFlags = true
+	fs.SetInterspersed(true)
+	fs.SetOutput(io.Discard)
+
+	fs.FuncP("config", "c", fmt.Sprintf("Path to config file (%s)", cfg.ConfigFile()), func(s string) error {
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid path to config file: %w", err)
+			}
+			*cfg = cfg.SetConfigFile(s)
+		}
+		return nil
+	})
+
+	if err := fs.Parse(*cmdArgs); err != nil {
+		return fmt.Errorf("failed to parse flags: %w", err)
+	}
+
+	if s, ok := lookupEnv("CONFIG"); ok {
+		if s != "" {
+			if err := canOpenFile(s); err != nil {
+				return fmt.Errorf("invalid ENV CONFIG: %w", err)
+			}
+			*cfg = cfg.SetConfigFile(s)
+		}
+	}
+
+	return nil
 }
 
 func (cfg *Config) readEnv(lookupEnv LookupEnvFunc) error {
@@ -179,22 +217,43 @@ func (cfg *Config) readEnv(lookupEnv LookupEnvFunc) error {
 			*cfg = cfg.SetConfigFile(s)
 		}
 	}
+
 	return nil
 }
 
-func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
-	fs.Func("d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
+func (cfg *Config) readCmdArgs(cmdArgs *[]string) error {
+	if cmdArgs == nil || len(*cmdArgs) == 0 {
+		return nil
+	}
+
+	fs := pflag.NewFlagSet("config", pflag.ContinueOnError)
+	fs.ParseErrorsAllowlist.UnknownFlags = true
+	fs.SetInterspersed(true)
+	fs.SetOutput(io.Discard)
+
+	fs.FuncP("addr", "a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
+		sAddr, err := NewSocketAddr(s)
+		if err != nil {
+			return fmt.Errorf("invalid ListenAddr format: %w", err)
+		}
+		*cfg = cfg.SetListenAddr(sAddr)
+		return nil
+	})
+
+	fs.FuncP("dsn", "d", fmt.Sprintf("DB DSN (%s)", cfg.DBDSN()), func(s string) error {
 		*cfg = cfg.SetDBDSN(s)
 		return nil
 	})
-	fs.Func("s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
-		if s == "" {
+
+	fs.FuncP("enable-https", "s", fmt.Sprintf("Enabled HTTPS (%t)", cfg.EnabledHTTPS()), func(s string) error {
+		if s == "" || s == "0" || s == "false" {
 			*cfg = cfg.SetEnabledHTTPS(false)
 		} else {
 			*cfg = cfg.SetEnabledHTTPS(true)
 		}
 		return nil
 	})
+
 	fs.Func("cert-file", fmt.Sprintf("Path to HTTPS certificate file (%s)", cfg.CertFile()), func(s string) error {
 		if s != "" {
 			if err := canOpenFile(s); err != nil {
@@ -204,6 +263,7 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		}
 		return nil
 	})
+
 	fs.Func("key-file", fmt.Sprintf("Path to HTTPS key file (%s)", cfg.KeyFile()), func(s string) error {
 		if s != "" {
 			if err := canOpenFile(s); err != nil {
@@ -213,15 +273,8 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		}
 		return nil
 	})
-	fs.Func("a", fmt.Sprintf("HTTP server address (%s)", cfg.ListenAddr()), func(s string) error {
-		sAddr, err := NewSocketAddr(s)
-		if err != nil {
-			return fmt.Errorf("invalid ListenAddr format: %w", err)
-		}
-		*cfg = cfg.SetListenAddr(sAddr)
-		return nil
-	})
-	fs.Func("b", fmt.Sprintf("Base address for short URL (%s)", cfg.ShortBaseURL()), func(s string) error {
+
+	fs.FuncP("base-address", "b", fmt.Sprintf("Base address for short URL (%s)", cfg.ShortBaseURL()), func(s string) error {
 		sbURL, err := NewShortBaseURL(s)
 		if err != nil {
 			return fmt.Errorf("invalid ShortBaseURL format: %w", err)
@@ -229,7 +282,8 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		*cfg = cfg.SetShortBaseURL(sbURL)
 		return nil
 	})
-	fs.Func("f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
+
+	fs.FuncP("file-storeage", "f", fmt.Sprintf("Path to Event storage file (%s)", cfg.EventStoragePath()), func(s string) error {
 		if s != "" {
 			if err := canOpenOrCreateFile(s); err != nil {
 				return fmt.Errorf("invalid path to event storage: %w", err)
@@ -238,6 +292,7 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		}
 		return nil
 	})
+
 	fs.Func("audit-file", fmt.Sprintf("Path to audit file (%s)", cfg.AuditFile()), func(s string) error {
 		if s != "" {
 			if err := canOpenOrCreateFile(s); err != nil {
@@ -247,6 +302,7 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		}
 		return nil
 	})
+
 	fs.Func("audit-url", fmt.Sprintf("Audit URL (%s)", cfg.AuditURL()), func(s string) error {
 		if s == "" {
 			return nil
@@ -258,15 +314,12 @@ func (cfg *Config) regCmdArgs(fs *flag.FlagSet) {
 		*cfg = cfg.SetAuditURL(u)
 		return nil
 	})
-	fs.Func("c", fmt.Sprintf("Path to config file (%s)", cfg.ConfigFile()), func(s string) error {
-		if s != "" {
-			if err := canOpenFile(s); err != nil {
-				return fmt.Errorf("invalid path to config file: %w", err)
-			}
-			*cfg = cfg.SetConfigFile(s)
-		}
-		return nil
-	})
+
+	if err := fs.Parse(*cmdArgs); err != nil {
+		return fmt.Errorf("failed to parse flags: %w", err)
+	}
+
+	return nil
 }
 
 // JWTTTL возвращает время жизни JWT токена.
