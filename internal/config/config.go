@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"time"
@@ -41,6 +42,7 @@ type Config struct {
 	certFile                 string
 	keyFile                  string
 	configFile               string
+	trustedSubnet            *netip.Prefix
 }
 
 // KeySession — тип-обертка для ключа сессии в контексте или куках.
@@ -150,6 +152,7 @@ func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) er
 		CertFile        string `json:"cert_file,omitempty"`
 		AuditFile       string `json:"audit_file,omitempty"`
 		AuditURL        string `json:"audit_url,omitempty"`
+		TrustedSubnet   string `json:"trusted_subnet,omitempty"`
 	}
 
 	var tmp ConfigParams
@@ -158,7 +161,9 @@ func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) er
 	if err != nil {
 		return fmt.Errorf("failed to open config file: %w", err)
 	}
-	defer cfgFile.Close()
+	defer func() {
+		_ = cfgFile.Close()
+	}()
 
 	if err := json.NewDecoder(cfgFile).Decode(&tmp); err != nil {
 		return fmt.Errorf("failed to decode json: %w", err)
@@ -191,7 +196,7 @@ func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) er
 		*cfg = cfg.SetDBDSN(val)
 	}
 
-	if val := tmp.EnableHTTPS; val == true {
+	if tmp.EnableHTTPS {
 		if keyFile := tmp.KeyFile; keyFile != "" {
 			if certFile := tmp.CertFile; certFile != "" {
 				*cfg = cfg.
@@ -207,6 +212,14 @@ func (cfg *Config) readJSONConfig(cmdArgs *[]string, lookupEnv LookupEnvFunc) er
 			return fmt.Errorf("config audit_file error: %w", err)
 		}
 		*cfg = cfg.SetAuditFile(val)
+	}
+
+	if cidr := tmp.TrustedSubnet; cidr != "" {
+		subnet, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return fmt.Errorf("trusted_subnet invalid format: %w", err)
+		}
+		*cfg = cfg.SetTrustedSubnet(&subnet)
 	}
 
 	if val := tmp.AuditURL; val != "" {
@@ -256,6 +269,13 @@ func (cfg *Config) readEnv(lookupEnv LookupEnvFunc) error {
 			return fmt.Errorf("invalid ENV AUDIT_URL: %w", err)
 		}
 		*cfg = cfg.SetAuditURL(u)
+	}
+	if cidr, ok := lookupEnv("TRUSTED_SUBNET"); ok && cidr != "" {
+		subnet, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return fmt.Errorf("invalid ENV TRUSTED_SUBNET: %w", err)
+		}
+		*cfg = cfg.SetTrustedSubnet(&subnet)
 	}
 	if s, ok := lookupEnv("ENABLE_HTTPS"); ok && s != "" && s != "0" && s != "false" {
 		*cfg = cfg.SetEnabledHTTPS(true)
@@ -328,6 +348,17 @@ func (cfg *Config) readCmdArgs(cmdArgs *[]string) error {
 				return fmt.Errorf("invalid path to HTTPS key file: %w", err)
 			}
 			*cfg = cfg.SetKeyFile(s)
+		}
+		return nil
+	})
+
+	fs.FuncP("trusted-subnet", "t", fmt.Sprintf("Trusted subnet CIDR (%s)", cfg.TrustedSubnet()), func(cidr string) error {
+		if cidr != "" {
+			subnet, err := netip.ParsePrefix(cidr)
+			if err != nil {
+				return fmt.Errorf("invalid trusted subnet CIDR -t: %w", err)
+			}
+			*cfg = cfg.SetTrustedSubnet(&subnet)
 		}
 		return nil
 	})
@@ -576,6 +607,17 @@ func (c Config) KeyFile() string {
 // SetKeyFile устанавливает путь к файлу HTTPS ключа и возвращает обновленный конфиг.
 func (c Config) SetKeyFile(keyFile string) Config {
 	c.keyFile = keyFile
+	return c
+}
+
+// TrustedSubnet CIDR доверенной сети
+func (c Config) TrustedSubnet() *netip.Prefix {
+	return c.trustedSubnet
+}
+
+// SetTrustedSubnets устанавливает CIDR доверенной сети
+func (c Config) SetTrustedSubnet(trustedSubnet *netip.Prefix) Config {
+	c.trustedSubnet = trustedSubnet
 	return c
 }
 

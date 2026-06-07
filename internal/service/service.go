@@ -290,3 +290,8 @@ func (s *Service) Batch(ctx context.Context, p dto.Batch) (dto.Batch, error) {
 
 	return res, nil
 }
+
+// GetInternalStats возвращает статистику
+func (s *Service) GetInternalStats(ctx context.Context) (dto.Stats, error) {
+	return s.repo.GetInternalStats(ctx)
+}
