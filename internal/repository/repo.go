@@ -50,6 +50,9 @@ type Repo interface {
 	// GetURL возвращает информацию об оригинальном URL по его короткому идентификатору.
 	GetURL(context.Context, dto.GetURL) (dto.GetURL, error)
 
+	// GetInternalStats возвращает статистику сервиса
+	GetInternalStats(context.Context) (dto.Stats, error)
+
 	// GetURLBySessionID возвращает список всех ссылок, созданных владельцем сессии.
 	GetURLBySessionID(context.Context, dto.GetURLBySessionID) (dto.GetURLBySessionID, error)
 

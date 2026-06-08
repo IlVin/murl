@@ -195,6 +195,21 @@ func (mr *MockRepoMockRecorder) DeleteURLBySessionID(arg0, arg1 any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteURLBySessionID", reflect.TypeOf((*MockRepo)(nil).DeleteURLBySessionID), arg0, arg1)
 }
 
+// GetInternalStats mocks base method.
+func (m *MockRepo) GetInternalStats(arg0 context.Context) (dto.Stats, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetInternalStats", arg0)
+	ret0, _ := ret[0].(dto.Stats)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetInternalStats indicates an expected call of GetInternalStats.
+func (mr *MockRepoMockRecorder) GetInternalStats(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInternalStats", reflect.TypeOf((*MockRepo)(nil).GetInternalStats), arg0)
+}
+
 // GetURL mocks base method.
 func (m *MockRepo) GetURL(arg0 context.Context, arg1 dto.GetURL) (dto.GetURL, error) {
 	m.ctrl.T.Helper()

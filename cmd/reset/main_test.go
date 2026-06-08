@@ -14,7 +14,9 @@ func TestGenerateReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// ВАЖНО: Добавляем нормальные отступы и комментарии для AST
 	sourceCode := `package testpkg
@@ -150,7 +152,9 @@ func TestFullGeneratorCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// Создаем файл, который заставит пройти по всем веткам switch-case
 	sourceCode := `
@@ -216,22 +220,24 @@ type Ignored struct {
 // TestEmptyAndHiddenDirs проверяет обход пустых папок и игнорирование vendor/.
 func TestEmptyAndHiddenDirs(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "reset_empty_test")
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// Создаем папку vendor (должна быть пропущена)
 	vendorPath := filepath.Join(tmpDir, "vendor")
-	os.Mkdir(vendorPath, 0755)
-	os.WriteFile(filepath.Join(vendorPath, "data.go"), []byte("package vendor\n // generate:reset\n type T struct{}"), 0644)
+	_ = os.Mkdir(vendorPath, 0755)
+	_ = os.WriteFile(filepath.Join(vendorPath, "data.go"), []byte("package vendor\n // generate:reset\n type T struct{}"), 0644)
 
 	// Создаем скрытую папку (должна быть пропущена)
 	dotPath := filepath.Join(tmpDir, ".git")
-	os.Mkdir(dotPath, 0755)
+	_ = os.Mkdir(dotPath, 0755)
 
 	// Запускаем через main-логику (filepath.Walk)
 	os.Args = []string{"cmd", tmpDir}
 	main() // Не должно упасть и не должно создать reset.gen.go в vendor
 
-	filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
 		if strings.Contains(path, "reset.gen.go") {
 			t.Errorf("Should not generate file in vendor or hidden dir: %s", path)
 		}
@@ -242,7 +248,9 @@ func TestEmptyAndHiddenDirs(t *testing.T) {
 // TestSyntaxError покрытие случая, когда format.Source получает битый код.
 func TestSyntaxError(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "reset_syntax_test")
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// Специально создаем ситуацию, которая может привести к битому коду
 	// (например, структура с некорректным именем для Go)
@@ -254,7 +262,7 @@ func TestSyntaxError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	resetTemplate.Execute(&buf, data)
+	_ = resetTemplate.Execute(&buf, data)
 
 	// format.Source должен выдать ошибку на "Broken-Struct"
 	_, err := format.Source(buf.Bytes())
