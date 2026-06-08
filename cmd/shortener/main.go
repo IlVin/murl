@@ -9,11 +9,13 @@ import (
 	"murl/internal/adapters/audit"
 	"murl/internal/config"
 	"murl/internal/handlers"
+	"murl/internal/handlers/middleware"
 	"murl/internal/model/auditlog"
 	"murl/internal/repository/repo"
 	"murl/internal/service"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -96,10 +98,19 @@ func run() error {
 		return err
 	}
 
+	// Интерцептор сессий
+	sessionInterceptor, err := middleware.SessionInterceptor(cfg)
+	if err != nil {
+		return err
+	}
+	grpc := grpc.NewServer(
+		grpc.UnaryInterceptor(sessionInterceptor),
+	)
+
 	// Запуск HTTP сервера
 	slog.Info("Starting server",
 		slog.String("ListenAddr", cfg.ListenAddr()),
 		slog.String("ShortBaseURL", cfg.ShortBaseURL().String()),
 	)
-	return handlers.Serve(cfg, router)
+	return handlers.Serve(cfg, router, grpc)
 }

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 //go:generate $GOPATH/bin/mockgen -source=$GOFILE -destination=session_mock_test.go -package=$GOPACKAGE
@@ -134,4 +136,108 @@ func extractToken(r *http.Request) string {
 		return cookie.Value
 	}
 	return ""
+}
+
+// extractTokenGRPC извлекает JWT из gRPC заголовка Authorization (Bearer)
+func extractTokenGRPC(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+
+	authHeader := md.Get("authorization")
+	if len(authHeader) == 0 || authHeader[0] == "" {
+		return ""
+	}
+
+	parts := strings.SplitN(authHeader[0], " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+
+	return parts[1]
+}
+
+// setSessionMetadata отправляет новый или обновленный токен обратно клиенту через gRPC-заголовки ответа
+func setSessionMetadata(ctx context.Context, token string) error {
+	md := metadata.Pairs("authorization", "Bearer "+token)
+	return grpc.SetHeader(ctx, md)
+}
+
+// SessionInterceptor идентифицирует пользователя по JWT из Bearer токена.
+//
+// Логика работы:
+// 1. Извлекает токен строго из gRPC заголовка Authorization (Bearer).
+// 2. Если токен валиден: проверяет необходимость продления. При продлении отправляет новый JWT обратно в метаданных ответа.
+// 3. Если токена нет или он невалиден: автоматически создает новую гостевую сессию и возвращает новый JWT клиенту.
+// 4. Помещает объект model.Session в gRPC-контекст запроса.
+func SessionInterceptor(cfg SessionConfig) (grpc.UnaryServerInterceptor, error) {
+	keySession := cfg.KeySession()
+
+	manager, err := jwtmanager.NewJWT(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("jwt manager fail: %w", err)
+	}
+
+	return func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (resp any, err error) {
+
+		// 1. Извлекаем JWT из входящего gRPC контекста (только Bearer)
+		tokenStr := extractTokenGRPC(ctx)
+
+		var session model.Session
+		var sessionExists bool
+
+		// 2. Пытаемся восстановить сессию
+		if tokenStr != "" {
+			session, err = manager.VerifyJWT(tokenStr)
+			if err == nil {
+				sessionExists = true
+
+				// --- ЛОГИКА ПРОДЛЕНИЯ ---
+				if manager.NeedRemaining(session) {
+					slog.Debug("session renewal triggered", slog.String("id", session.ID.String()))
+
+					newToken, errJWT := manager.GenerateJWT(session)
+					if errJWT == nil {
+						if updated, parseErr := manager.VerifyJWT(newToken); parseErr == nil {
+							session = updated
+						}
+						// Отправляем обновленный токен обратно в заголовках gRPC ответа
+						setSessionMetadata(ctx, newToken)
+					}
+				}
+			} else {
+				slog.Warn("invalid token, generating guest session", slog.Any("err", err))
+			}
+		}
+
+		// 3. Создание новой гостевой сессии, если старой нет или она была невалидной
+		if !sessionExists {
+			session = model.Session{
+				ID: uuid.New(),
+			}
+
+			token, errJWT := manager.GenerateJWT(session)
+			if errJWT == nil {
+				if updated, parseErr := manager.VerifyJWT(token); parseErr == nil {
+					session = updated
+				}
+				if err := setSessionMetadata(ctx, token); err != nil {
+					slog.Error("session renewal fail",
+						slog.Any("err", err),
+					)
+				}
+			}
+		}
+
+		// 4. Обогащаем gRPC-контекст сессией и передаем управление дальше в хендлер метода
+		newCtx := context.WithValue(ctx, keySession, session)
+
+		return handler(newCtx, req)
+	}, nil
 }

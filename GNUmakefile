@@ -14,6 +14,7 @@ all: test build
 build:
 	@echo "Building binary..."
 	go generate ./...
+	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative --go_opt=default_api_level=API_OPAQUE proto/murl.proto
 	CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildVersion=${VERSION} -X main.buildCommit=$$(git log -1 --format='%H') -X main.buildDate=$$(date +%F)" -o $(BINARY_NAME) $(MAIN_PATH)
 
 ## Docker-build: Сборка образа на базе пустого scratch

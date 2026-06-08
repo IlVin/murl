@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 // mockHandlers реализует интерфейс MicroURLHandlers для тестирования роутера
@@ -87,10 +88,12 @@ func TestServe(t *testing.T) {
 	// Тестируем запуск сервера на случайном порту (порт :0)
 	cfg := mockServeCfg{addr: "127.0.0.1:0"}
 	mux := http.NewServeMux()
+	grpc := grpc.NewServer()
 
-	// Запускаем сервер в горутине, так как ListenAndServe блокирует поток
+	// Запускаем сервер в горутине, так как Serve блокирует поток
+	// Передаем nil для grpcServer, так как мы не тестируем gRPC
 	go func() {
-		err := Serve(cfg, mux)
+		err := Serve(cfg, mux, grpc)
 		if err != nil && err != http.ErrServerClosed {
 			return
 		}
