@@ -14,6 +14,7 @@ import (
 	config "murl/internal/config"
 	dto "murl/internal/dto"
 	model "murl/internal/model"
+	netip "net/netip"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -55,6 +56,20 @@ func (m *MockHandlersConfig) KeySession() config.KeySession {
 func (mr *MockHandlersConfigMockRecorder) KeySession() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "KeySession", reflect.TypeOf((*MockHandlersConfig)(nil).KeySession))
+}
+
+// TrustedSubnet mocks base method.
+func (m *MockHandlersConfig) TrustedSubnet() *netip.Prefix {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TrustedSubnet")
+	ret0, _ := ret[0].(*netip.Prefix)
+	return ret0
+}
+
+// TrustedSubnet indicates an expected call of TrustedSubnet.
+func (mr *MockHandlersConfigMockRecorder) TrustedSubnet() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TrustedSubnet", reflect.TypeOf((*MockHandlersConfig)(nil).TrustedSubnet))
 }
 
 // MockMicroURLService is a mock of MicroURLService interface.
@@ -123,6 +138,21 @@ func (m *MockMicroURLService) DeleteURLBySessionID(ctx context.Context, session 
 func (mr *MockMicroURLServiceMockRecorder) DeleteURLBySessionID(ctx, session, data any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteURLBySessionID", reflect.TypeOf((*MockMicroURLService)(nil).DeleteURLBySessionID), ctx, session, data)
+}
+
+// GetInternalStats mocks base method.
+func (m *MockMicroURLService) GetInternalStats(ctx context.Context) (dto.Stats, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetInternalStats", ctx)
+	ret0, _ := ret[0].(dto.Stats)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetInternalStats indicates an expected call of GetInternalStats.
+func (mr *MockMicroURLServiceMockRecorder) GetInternalStats(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInternalStats", reflect.TypeOf((*MockMicroURLService)(nil).GetInternalStats), ctx)
 }
 
 // GetURL mocks base method.

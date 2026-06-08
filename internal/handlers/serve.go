@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"murl/internal/handlers/middleware"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +12,8 @@ import (
 	"time"
 
 	chi "github.com/go-chi/chi/v5"
+	"github.com/soheilhy/cmux"
+	"google.golang.org/grpc"
 
 	_ "net/http/pprof"
 )
@@ -157,32 +159,76 @@ func newChiRouter(cfg RouterConfig, s MicroURLHandlers) (http.Handler, error) {
 // Serve выполняет запуск HTTP-сервера на указанном в конфигурации адресе.
 // Метод является блокирующим и возвращает ошибку, если сервер не смог запуститься
 // или прекратил работу аварийно.
-func Serve(cfg IServeConfig, router http.Handler) error {
+func Serve(cfg IServeConfig, router http.Handler, grpcServer *grpc.Server) error {
+	// 1. Создаем один общий TCP-listener
+	lis, err := net.Listen("tcp", cfg.ListenAddr())
+	if err != nil {
+		return err
+	}
+
+	// 2. Создаем cmux инстанс поверх listener
+	m := cmux.New(lis)
+
+	// 3. Объявляем правила сортировки трафика
+	// gRPC всегда использует HTTP/2 с определенным заголовком (обычно proto-запросы начинаются с этого)
+	grpcLis := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	// Все остальное отдаем под обычный HTTP
+	httpLis := m.Match(cmux.Any())
+
+	// 4. Инициализируем стандартный HTTP-сервер
 	srv := http.Server{
-		Addr:    cfg.ListenAddr(),
 		Handler: router,
 	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// Канал для отслеживания ошибок запуска горутин
+	errChan := make(chan error, 3)
 
+	// Запуск gRPC
 	go func() {
-		slog.Info("Server started")
-		if cfg.EnabledHTTPS() {
-			if err := srv.ListenAndServeTLS(cfg.CertFile(), cfg.KeyFile()); err != http.ErrServerClosed {
-				log.Fatalf("HTTP server ListenAndServeTLS: %v", err)
-			}
-		} else {
-			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-				log.Fatalf("HTTP server ListenAndServe: %v", err)
-			}
+		slog.Info("gRPC sub-server starting")
+		if err := grpcServer.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
+			errChan <- err
 		}
 	}()
 
-	<-sigChan
+	// Запуск HTTP (или HTTPS)
+	go func() {
+		slog.Info("HTTP sub-server starting")
+		var err error
+		if cfg.EnabledHTTPS() {
+			err = srv.ServeTLS(httpLis, cfg.CertFile(), cfg.KeyFile())
+		} else {
+			err = srv.Serve(httpLis)
+		}
+		if err != http.ErrServerClosed {
+			errChan <- err
+		}
+	}()
 
+	// Запуск самого мультиплексора (это блокирующий вызов)
+	go func() {
+		slog.Info("Multiplexer (cmux) started", "addr", cfg.ListenAddr())
+		if err := m.Serve(); err != nil {
+			errChan <- err
+		}
+	}()
+
+	// Ожидание сигналов закрытия
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-errChan:
+		slog.Error("Server crashed", "error", err)
+	case <-sigChan:
+		slog.Info("Shutting down servers...")
+	}
+
+	// Грациозное завершение работы
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Стопаем gRPC и HTTP
+	grpcServer.GracefulStop()
 	return srv.Shutdown(ctx)
 }

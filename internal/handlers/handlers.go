@@ -25,6 +25,7 @@ import (
 	"murl/internal/model"
 	"murl/internal/service"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/bcicen/jstream"
@@ -35,6 +36,7 @@ import (
 // HandlersConfig определяет набор параметров конфигурации для работы HTTP-хендлеров.
 type HandlersConfig interface {
 	KeySession() config.KeySession
+	TrustedSubnet() *netip.Prefix
 }
 
 // MicroURLService описывает интерфейс бизнес-логики, необходимый для работы хендлеров.
@@ -46,19 +48,22 @@ type MicroURLService interface {
 	GetURLBySessionID(ctx context.Context, session model.Session) (dto.GetURLBySessionID, error)
 	Ping(ctx context.Context) error
 	DeleteURLBySessionID(ctx context.Context, session model.Session, data []string) error
+	GetInternalStats(ctx context.Context) (dto.Stats, error)
 }
 
 // Handlers объединяет все обработчики HTTP-запросов приложения.
 type Handlers struct {
-	service    MicroURLService
-	keySession config.KeySession
+	service       MicroURLService
+	keySession    config.KeySession
+	trustedSubnet *netip.Prefix
 }
 
 // NewHandlers — конструктор для создания набора HTTP-обработчиков.
 func NewHandlers(cfg HandlersConfig, service MicroURLService) *Handlers {
 	return &Handlers{
-		service:    service,
-		keySession: cfg.KeySession(),
+		service:       service,
+		keySession:    cfg.KeySession(),
+		trustedSubnet: cfg.TrustedSubnet(),
 	}
 }
 
@@ -131,7 +136,6 @@ func (h *Handlers) AddURL() http.HandlerFunc {
 
 		originalURL := string(buf)
 		shortURL, err := h.service.AddURL(r.Context(), originalURL)
-
 		httpStatus, err := ErrHandling(err, http.StatusCreated)
 
 		if err != nil {
@@ -560,6 +564,80 @@ func (h *Handlers) Ping() http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// =========== GET /api/internal/stats ==================
+
+// GetInternalStats статистика сервиса
+// Возвращает статистику сервиса для доверенной сети
+// @Summary      Статистика сервиса
+// @Description  Проверяет доступ и возвращает JSON со статистикой
+// @Success      200  {string}  string  "JSON"
+// @Failure      403  {string}  string  "Доступ запрещен"
+// @Failure      500  {string}  string  "Внутренняя ошибка сервера"
+// @Router       /api/internal/stats
+func (h *Handlers) GetInternalStats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		clientIP := r.Header.Get("X-Real-IP")
+
+		isTrusted, err := isIPInPrefix(h.trustedSubnet, clientIP)
+		if !isTrusted {
+			if err != nil {
+				slog.Error("access denied",
+					slog.Any("trusted_subnet", h.trustedSubnet),
+					slog.String("x_real_ip", clientIP),
+					slog.Any("err", err),
+				)
+			}
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		jsResp, err := h.service.GetInternalStats(r.Context())
+		if err != nil {
+			slog.Error("failed to get internal stats",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		data, err := json.Marshal(jsResp)
+		if err != nil {
+			slog.Error("failed to encode response",
+				slog.Any("err", err),
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		if _, err := w.Write(data); err != nil {
+			slog.Debug("failed to write response",
+				slog.Any("err", err),
+			)
+		}
+	}
+}
+
+// isIPInPrefix проверяет, входит ли IP из заголовка в указанную подсеть
+func isIPInPrefix(prefix *netip.Prefix, ipStr string) (bool, error) {
+	if prefix == nil {
+		return false, errors.New("trusted subnet not specified")
+	}
+
+	if ipStr == "" {
+		return false, errors.New("X-Real-IP header is empty")
+	}
+
+	ip, err := netip.ParseAddr(ipStr)
+	if err != nil {
+		return false, fmt.Errorf("invalid IP format: %w", err)
+	}
+
+	return prefix.Contains(ip), nil
 }
 
 // =========== DEFAULT ==================

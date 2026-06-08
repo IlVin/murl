@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -19,11 +20,16 @@ import (
 
 // Вспомогательный мок конфига
 type mockSvcConfig struct {
-	keySession config.KeySession
+	keySession    config.KeySession
+	trustedSubnet *netip.Prefix
 }
 
 func (m *mockSvcConfig) KeySession() config.KeySession {
 	return m.keySession
+}
+
+func (m *mockSvcConfig) TrustedSubnet() *netip.Prefix {
+	return m.trustedSubnet
 }
 
 func TestHandlers_AddURL_Success(t *testing.T) {
@@ -154,4 +160,92 @@ func TestHandlers_Ping_Error(t *testing.T) {
 	h.Ping()(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestHandlers_GetInternalStats(t *testing.T) {
+	// Парсим тестовую подсеть для конфигурации хэндлера
+	subnet, err := netip.ParsePrefix("192.168.1.0/24")
+	if err != nil {
+		t.Fatalf("failed to parse test subnet: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		xRealIP        string
+		setupMock      func(m *MockMicroURLService)
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:    "Success - Trusted IPv4",
+			xRealIP: "192.168.1.50", // IP входит в 192.168.1.0/24
+			setupMock: func(m *MockMicroURLService) {
+				m.EXPECT().
+					GetInternalStats(gomock.Any()).
+					// Используем реальный тип dto.Stats (поля настройте под вашу структуру)
+					Return(dto.Stats{URLs: 100, Users: 10}, nil)
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"urls":100,"users":10}`, // Имена полей в JSON должны совпадать с тегами в dto.Stats
+		},
+		{
+			name:           "Forbidden - Untrusted IPv4",
+			xRealIP:        "10.0.0.1",
+			setupMock:      func(m *MockMicroURLService) {}, // Сервис не вызывается
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   "",
+		},
+		{
+			name:           "Forbidden - Empty X-Real-IP Header",
+			xRealIP:        "",
+			setupMock:      func(m *MockMicroURLService) {}, // Сервис не вызывается
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   "",
+		},
+		{
+			name:    "Error - Service Failure",
+			xRealIP: "192.168.1.100",
+			setupMock: func(m *MockMicroURLService) {
+				m.EXPECT().
+					GetInternalStats(gomock.Any()).
+					// Возвращаем пустую структуру вместо nil, так как dto.Stats не является указателем
+					Return(dto.Stats{}, errors.New("internal database error"))
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockSvc := NewMockMicroURLService(ctrl)
+			cfg := &mockSvcConfig{
+				keySession:    "keySession",
+				trustedSubnet: &subnet,
+			}
+
+			h := NewHandlers(cfg, mockSvc)
+
+			tt.setupMock(mockSvc)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+			if tt.xRealIP != "" {
+				req.Header.Set("X-Real-IP", tt.xRealIP)
+			}
+
+			w := httptest.NewRecorder()
+
+			h.GetInternalStats()(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedBody != "" {
+				assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+				assert.JSONEq(t, tt.expectedBody, w.Body.String())
+			}
+		})
+	}
 }

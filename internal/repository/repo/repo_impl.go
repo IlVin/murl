@@ -17,9 +17,12 @@ import (
 	"murl/internal/repository/wal"
 )
 
-//go:generate $GOPATH/bin/mockgen -source=../../adapters/pgc/pgc.go -destination=repo_impl_pgc_mock_test.go          -package=$GOPACKAGE
-//go:generate $GOPATH/bin/mockgen -source=../wal/wal.go             -destination=repo_impl_wal_mock_test.go          -package=$GOPACKAGE
-//go:generate $GOPATH/bin/mockgen -source=../repo_links.go          -destination=repo_impl_repo_links_mock_test.go   -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../../adapters/pgc/pgc.go       -destination=repo_impl_pgc_mock_test.go                       -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../wal/wal.go                   -destination=repo_impl_wal_mock_test.go                       -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repo_links.go                -destination=repo_impl_repo_links_mock_test.go                -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repo_links_by_session_id.go  -destination=repo_impl_repo_links_by_session_id_mock_test.go  -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../repo_stats.go                -destination=repo_impl_repo_stats_mock_test.go                -package=$GOPACKAGE
+//go:generate $GOPATH/bin/mockgen -source=../../model/event/event.go      -destination=repo_impl_event_mock_test.go                     -package=$GOPACKAGE
 
 const (
 	// RepoInMemory — идентификатор драйвера для работы в оперативной памяти.
@@ -34,6 +37,7 @@ type repo struct {
 	memCore              *inmem.InMemCore
 	repoLinksBySessionID repository.RepoLinksBySessionID
 	repoLinks            repository.RepoLinks
+	repoStats            repository.RepoStats
 	wal                  wal.WAL
 }
 
@@ -56,6 +60,7 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 		}
 		r.repoLinks = pg.NewPgRepoLinks(r.pgInst)
 		r.repoLinksBySessionID = pg.NewPgRepoLinksBySessionID(r.pgInst)
+		r.repoStats = pg.NewPgRepoStats(r.pgInst)
 	} else if cfg.RepoDrv() == RepoInMemory {
 		r.memCore, err = inmem.NewInMemCore(cfg)
 		if err != nil {
@@ -63,6 +68,7 @@ func NewRepo(ctx context.Context, cfg repository.RepoConfig) (r *repo, err error
 		}
 		r.repoLinks = inmem.NewInMemRepoLinks(r.memCore)
 		r.repoLinksBySessionID = inmem.NewInMemRepoLinksBySessionID(r.memCore)
+		r.repoStats = inmem.NewInMemRepoStats(r.memCore)
 	} else {
 		return nil, fmt.Errorf("unknown repo driver '%s': %w", cfg.RepoDrv(), repository.ErrInternalServerError)
 	}
@@ -175,6 +181,11 @@ func (r *repo) On(ctx context.Context, e event.Event) error {
 		return nil
 	}
 	return fmt.Errorf("event type '%s' not implemented", e.GetType())
+}
+
+// GetInternalStats возвращает статистику
+func (r *repo) GetInternalStats(ctx context.Context) (dto.Stats, error) {
+	return r.repoStats.GetStats(ctx)
 }
 
 // AddURL сохраняет новую ссылку. Если WAL активен и конфликта не возникло,
